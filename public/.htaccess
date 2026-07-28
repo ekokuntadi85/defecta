@@ -1,0 +1,32 @@
+# ── Keamanan Defecta App ─────────────────────────────────────
+
+# Nonaktifkan directory listing
+Options -Indexes
+
+# Sembunyikan versi server
+ServerSignature Off
+
+# Blokir akses ke config.php (file credential DB)
+<Files "config.php">
+    Require all denied
+</Files>
+
+# Blokir akses ke folder .git
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^\.git(/.*)?$ - [F,L,NC]
+    RewriteRule (^|/)\.git(/|$) - [F,L,NC]
+</IfModule>
+
+# Blokir akses file sensitif
+<FilesMatch "\.(env|log|sh|sql|bak|old|tmp|md)$">
+    Require all denied
+</FilesMatch>
+
+# Security response headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

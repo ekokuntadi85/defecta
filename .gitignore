@@ -1,0 +1,11 @@
+# Secrets / local environment
+.env
+
+# Database dumps (backups)
+*.sql
+*.sql.gz
+backups/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

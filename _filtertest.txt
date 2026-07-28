@@ -1,0 +1,5 @@
+MARIADB_PW=change_this_pw
+APP_PIN=change_this_pin
+DB_PASS=change_this_db
+MARIADB_PASSWORD=should_be_redacted
+APP_PASSWORD=should_be_redacted
