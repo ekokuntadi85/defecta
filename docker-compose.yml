@@ -7,29 +7,9 @@ services:
       - .env
     environment:
       APP_PASSWORD: ${APP_PIN}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  db:
-    image: mariadb:11
-    env_file:
-      - .env
-    environment:
-      MARIADB_PASSWORD: ${MARIADB_PW}
-      MARIADB_ROOT_PASSWORD: ${MARIADB_PW}
-    # Cap MariaDB RAM for small-hardware machines (plenty for this tiny DB)
-    command: ["--innodb-buffer-pool-size=32M"]
     volumes:
-      - db_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      - sqlite_data:/var/www/html/data
     restart: unless-stopped
 
 volumes:
-  db_data:
+  sqlite_data:

@@ -2,20 +2,27 @@ SOFTWARE DEFECTA — DOCKER SETUP
 ===============================
 
 This app is containerized so it runs on any machine that has Docker +
-Docker Compose, with no manual PHP/MySQL install.
+Docker Compose, with no manual PHP install.
 
-Files added:
-  Dockerfile          - PHP + Apache image (the web server)
-  docker-compose.yml  - two services: web ("app") + database ("db", MariaDB)
-  .env.example        - config template (DB creds + app PIN)
+Files:
+  Dockerfile            - Alpine + Apache + mod_php image (the web server)
+  docker-compose.yml    - one service: the web app (no separate DB server)
+  docker/httpd-*.conf   - Apache tweaks (docroot, .htaccess, rewrite, logs)
+  .env.example          - config template (app PIN + SQLite path)
+
+WHY SQLITE + ALPINE?
+--------------------
+- One container, one file as the whole database. No DB server to run,
+  secure, or password-protect. Ideal for this single-pharmacy app.
+- Alpine Linux makes the image ~5x smaller than the old PHP+MariaDB stack
+  (about 150 MB vs 715 MB) and much lighter on RAM at runtime.
 
 HOW TO RUN
 ----------
 1. Install Docker Desktop (Windows/Mac) or Docker Engine (Linux).
 2. Create the env file:
        cp .env.example .env
-   (Edit .env to set DB_PASS, APP_PIN, and MARIADB_PW. APP_PIN is the
-    login PIN; MARIADB_PW is the database password.)
+   (Edit .env to set APP_PIN, the login PIN.)
 3. Build and start:
        docker compose up -d --build
 4. Open http://localhost:8080 in a browser.
@@ -26,20 +33,26 @@ STOP / REMOVE
 -------------
 - Stop (data is kept in the volume):
        docker compose down
-- Stop AND erase all database data:
+- Stop AND erase all data:
        docker compose down -v
 
 WHERE THE DATA LIVES
 --------------------
-All data lives in the Docker volume "defecta_db_data" (MariaDB).
-The app code stores no files, so a backup = a database dump.
+The whole database is one SQLite file: /var/www/html/data/defecta.sqlite,
+inside the Docker volume "defecta_sqlite_data". WAL mode + busy_timeout
+keep concurrent writes safe (SQLite = 1 writer, fine for this app).
+
+BACKUP
+------
+Because everything is one file, a backup is just copying that file out:
+   docker compose exec app cp /var/www/html/data/defecta.sqlite ./backup.sqlite
+To restore, copy it back in (stop the container first).
 
 NOTES
 -----
-- config.php reads credentials from the environment (DB_HOST, DB_USER,
-  ...) with fallbacks to the old values, so it still runs in a
-  non-Docker setup.
-- In Docker, DB_HOST = "db" (the database service name in compose).
-- Performance on small hardware: OPcache is enabled in the PHP image
-  (faster responses, lower CPU) and MariaDB's buffer pool is capped at
-  32M to save RAM. Both are safe for this tiny app.
+- The SQLite file (and config.php) are blocked from web access, both by
+  .htaccess and by the Apache config.
+- Timestamps (created_at / updated_at) use SQLite CURRENT_TIMESTAMP, which
+  is UTC. The PHP timezone is set to Asia/Jakarta (was +07:00 on MySQL).
+- Performance on small hardware: OPcache is enabled (faster responses,
+  lower CPU). Safe for this tiny app.

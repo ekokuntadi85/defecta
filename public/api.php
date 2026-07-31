@@ -182,7 +182,7 @@ try {
                 break;
             }
             $ph   = implode(',', array_fill(0, count($ids), '?'));
-            $stmt = $db->prepare("UPDATE defecta SET status='tersedia' WHERE id IN ($ph) AND status='defecta'");
+            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = CURRENT_TIMESTAMP WHERE id IN ($ph) AND status='defecta'");
             $stmt->execute(array_values($ids));
             $n = $stmt->rowCount();
             echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
@@ -197,7 +197,7 @@ try {
                 break;
             }
             $ph   = implode(',', array_fill(0, count($ids), '?'));
-            $stmt = $db->prepare("UPDATE defecta SET status='defecta' WHERE id IN ($ph) AND status='tersedia'");
+            $stmt = $db->prepare("UPDATE defecta SET status='defecta', updated_at = CURRENT_TIMESTAMP WHERE id IN ($ph) AND status='tersedia'");
             $stmt->execute(array_values($ids));
             $n = $stmt->rowCount();
             echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
@@ -265,7 +265,7 @@ try {
 
             $stmt = $db->prepare("
                 UPDATE defecta
-                SET tanggal = :tgl, nama_obat = :obat, keterangan = :ket
+                SET tanggal = :tgl, nama_obat = :obat, keterangan = :ket, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
             ");
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':id' => $id]);
@@ -277,7 +277,7 @@ try {
         case 'tersedia':
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'ID tidak valid.']); break; }
-            $stmt = $db->prepare("UPDATE defecta SET status='tersedia' WHERE id=:id AND status='defecta'");
+            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = CURRENT_TIMESTAMP WHERE id=:id AND status='defecta'");
             $stmt->execute([':id' => $id]);
             echo $stmt->rowCount() > 0
                 ? json_encode(['success' => true,  'message' => 'Status diperbarui menjadi tersedia.'])

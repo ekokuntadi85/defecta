@@ -19,7 +19,7 @@ ServerSignature Off
 </IfModule>
 
 # Blokir akses file sensitif
-<FilesMatch "\.(env|log|sh|sql|bak|old|tmp|md)$">
+<FilesMatch "\.(env|log|sh|sql|sqlite|db|sqlite3|bak|old|tmp|md)$">
     Require all denied
 </FilesMatch>
 
