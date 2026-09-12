@@ -5,10 +5,19 @@
 *.sql
 *.sql.gz
 backups/
+defecta.sqlite
 
 # OS / editor noise
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
 *-check-this-codebase.txt
-defecta.sqlite
+
+# Composer / PHPUnit
+vendor/
+composer.lock
+.phpunit.cache/
+tmp/
+
+# Docker
+*.pid

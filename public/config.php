@@ -16,6 +16,17 @@ date_default_timezone_set('Asia/Jakarta');
 // Password Aplikasi (Simple PIN/Pass untuk seluruh Staf)
 define('APP_PASSWORD', getenv('APP_PASSWORD') ?: '1324'); // Silakan ganti sesuai keinginan
 
+// ── USER IDENTITY ─────────────────────────────────────────────
+// Daftar staff yang dapat login (nama => label tampilan)
+// Untuk keperluan audit trail: mencatat siapa yang melakukan perubahan.
+define('STAFF_LIST', [
+    ''           => 'Pilih nama...',
+    'andi'       => 'Andi (Apoteker)',
+    'sari'       => 'Sari (Staf)',
+    'budi'       => 'Budi (Staf)',
+    'lina'       => 'Lina (Staf)',
+]);
+
 /**
  * Memulai session untuk autentikasi
  */
@@ -33,6 +44,9 @@ if (empty($_SESSION['csrf_token'])) {
 }
 
 function csrf_token(): string {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
     return $_SESSION['csrf_token'];
 }
 
@@ -41,6 +55,20 @@ function csrf_token(): string {
  */
 function is_logged_in(): bool {
     return isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true;
+}
+
+/**
+ * Dapatkan nama staff yang sedang login (untuk audit trail)
+ */
+function current_staff(): string {
+    return $_SESSION['staff_name'] ?? 'unknown';
+}
+
+/**
+ * Set staff yang sedang login
+ */
+function set_staff(string $name): void {
+    $_SESSION['staff_name'] = $name;
 }
 
 /**
@@ -90,12 +118,26 @@ function initDB(): void {
                 keterangan  TEXT NOT NULL,
                 status      TEXT NOT NULL DEFAULT 'defecta' CHECK(status IN ('defecta','tersedia')),
                 created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
+                updated_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_by  TEXT,
+                updated_by  TEXT
             )
         ");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_status  ON defecta(status)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_tanggal ON defecta(tanggal)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_nama    ON defecta(nama_obat)");
+    } else {
+        // ── MIGRASI: tambah kolom audit trail jika belum ada ──
+        // PRAGMA table_info mengembalikan kolom: cid, name, type, notnull, dflt_value, pk
+        // Harus pakai FETCH_NUM dan ambil indeks ke-1 (name) atau FETCH_ASSOC
+        $pragmaRows = $db->query("PRAGMA table_info(defecta)")->fetchAll(PDO::FETCH_ASSOC);
+        $colNames = array_column($pragmaRows, 'name');
+        if (!in_array('created_by', $colNames)) {
+            $db->exec("ALTER TABLE defecta ADD COLUMN created_by TEXT");
+        }
+        if (!in_array('updated_by', $colNames)) {
+            $db->exec("ALTER TABLE defecta ADD COLUMN updated_by TEXT");
+        }
     }
 
     if (!in_array('login_attempts', $tables, true)) {

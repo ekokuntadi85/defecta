@@ -38,7 +38,18 @@ if ($action === 'login') {
     if (is_string($password) && hash_equals(APP_PASSWORD, $password)) {
         session_regenerate_id(true); // cegah session fixation
         $_SESSION['logged_in'] = true;
-        echo json_encode(['success' => true, 'message' => 'Login berhasil.']);
+        // Simpan nama staff bila dikirimkan (untuk audit trail)
+        $staff = trim($_POST['staff_name'] ?? '');
+        if ($staff !== '' && array_key_exists($staff, STAFF_LIST)) {
+            set_staff($staff);
+        } else {
+            set_staff('unknown');
+        }
+        echo json_encode([
+            'success'    => true,
+            'message'    => 'Login berhasil.',
+            'staff_name' => current_staff(),
+        ]);
     } else {
         $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
         $ins->execute([':ip' => $ip]);
@@ -205,8 +216,8 @@ try {
                 break;
             }
 
-            $stmt = $db->prepare("INSERT INTO defecta (tanggal, nama_obat, keterangan, status, created_at, updated_at) VALUES (:tgl, :obat, :ket, 'defecta', :now, :now)");
-            $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':now' => now()]);
+            $stmt = $db->prepare("INSERT INTO defecta (tanggal, nama_obat, keterangan, status, created_at, updated_at, created_by, updated_by) VALUES (:tgl, :obat, :ket, 'defecta', :now, :now, :staff, :staff)");
+            $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':now' => now(), ':staff' => current_staff()]);
             echo json_encode(['success' => true, 'message' => 'Data berhasil ditambahkan.', 'id' => (int)$db->lastInsertId()]);
             break;
 
@@ -221,7 +232,8 @@ try {
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
             $params = [':now' => now()];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
-            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now WHERE id IN ($ph) AND status='defecta'");
+            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='defecta'");
+            $stmt->execute(array_merge([':now' => now(), ':staff' => current_staff()], $params));
             $stmt->execute($params);
             $n = $stmt->rowCount();
             echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
@@ -238,7 +250,8 @@ try {
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
             $params = [':now' => now()];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
-            $stmt = $db->prepare("UPDATE defecta SET status='defecta', updated_at = :now WHERE id IN ($ph) AND status='tersedia'");
+            $stmt = $db->prepare("UPDATE defecta SET status='defecta', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
+            $stmt->execute(array_merge([':now' => now(), ':staff' => current_staff()], $params));
             $stmt->execute($params);
             $n = $stmt->rowCount();
             echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
@@ -306,10 +319,10 @@ try {
 
             $stmt = $db->prepare("
                 UPDATE defecta
-                SET tanggal = :tgl, nama_obat = :obat, keterangan = :ket, updated_at = :now
+                SET tanggal = :tgl, nama_obat = :obat, keterangan = :ket, updated_at = :now, updated_by = :staff
                 WHERE id = :id
             ");
-            $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':id' => $id, ':now' => now()]);
+            $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':id' => $id, ':now' => now(), ':staff' => current_staff()]);
 
             echo json_encode(['success' => true, 'message' => 'Data berhasil diperbarui.']);
             break;
@@ -318,8 +331,8 @@ try {
         case 'tersedia':
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'ID tidak valid.']); break; }
-            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now WHERE id=:id AND status='defecta'");
-            $stmt->execute([':id' => $id, ':now' => now()]);
+            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id=:id AND status='defecta'");
+            $stmt->execute([':id' => $id, ':now' => now(), ':staff' => current_staff()]);
             echo $stmt->rowCount() > 0
                 ? json_encode(['success' => true,  'message' => 'Status diperbarui menjadi tersedia.'])
                 : json_encode(['success' => false, 'message' => 'Data tidak ditemukan.']);

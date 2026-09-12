@@ -917,7 +917,9 @@ async function submitEdit(e) {
 async function doLogin() {
     console.log('[Auth] Memulai login...');
     const pinInput = document.getElementById('pinInput');
+    const staffSelect = document.getElementById('staffSelect');
     const pin = pinInput.value;
+    const staff = staffSelect ? staffSelect.value : '';
     const btn = document.getElementById('btnLogin');
     if (!pin) { alert('Masukkan PIN terlebih dahulu.'); return; }
 
@@ -929,6 +931,7 @@ async function doLogin() {
         params.append('action', 'login');
         params.append('password', pin);
         params.append('csrf_token', csrfToken());
+        if (staff) params.append('staff_name', staff);
 
         console.log('[Auth] Mengirim request ke ./api.php');
         const res = await fetch('./api.php', {
@@ -957,7 +960,7 @@ async function doLogin() {
         }
 
         if (json.success) {
-            console.log('[Auth] Login BERHASIL, memuat ulang halaman...');
+            console.log('[Auth] Login BERHASIL, staff:', json.staff_name, ', memuat ulang halaman...');
             location.reload();
         } else {
             console.warn('[Auth] Login GAGAL:', json.message);
