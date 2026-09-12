@@ -83,9 +83,16 @@ function now(): string {
  */
 function getDB(): PDO {
     static $pdo = null;
+    static $lastPath = null;
+    $path = getenv('DB_SQLITE_PATH') ?: (__DIR__ . '/data/defecta.sqlite');
+
+    // Reset connection if DB path changed (needed for testing)
+    if ($lastPath !== $path) {
+        $pdo = null;
+        $lastPath = $path;
+    }
     if ($pdo !== null) return $pdo;
 
-    $path = getenv('DB_SQLITE_PATH') ?: (__DIR__ . '/data/defecta.sqlite');
     $dir  = dirname($path);
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
 

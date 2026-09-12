@@ -1,6 +1,11 @@
 <?php
 require_once 'config.php';
 $today = date('Y-m-d');
+$templateVars = [
+    'today' => $today,
+    'page'  => 'laporan',
+];
+extract($templateVars, EXTR_SKIP);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -57,22 +62,7 @@ $today = date('Y-m-d');
 
 <?php endif; ?>
 
-<?php if (!is_logged_in()): ?>
-  <script src="assets/js/app.js"></script>
-<?php else: ?>
-  <script>
-    async function doLogout() {
-      if (!confirm('Logout dari aplikasi?')) return;
-      const fd = new FormData();
-      fd.append('action', 'logout');
-      const m = document.querySelector('meta[name="csrf-token"]');
-      fd.append('csrf_token', m ? m.content : '');
-      await fetch('api.php', { method: 'POST', body: fd });
-      location.reload();
-    }
-  </script>
-  <script src="assets/js/laporan.js"></script>
-<?php endif; ?>
+<?php include 'includes/scripts.php'; ?>
 
 </body>
 </html>

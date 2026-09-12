@@ -9,10 +9,11 @@
           <th>Nama Obat</th>
           <th>Keterangan</th>
           <th style="text-align:center;width:100px">Status</th>
+          <th style="width:120px">Dibuat Oleh</th>
         </tr>
       </thead>
       <tbody id="reportTableBody">
-        <tr class="loading-row"><td colspan="5"><span class="spinner"></span>Memuat data...</td></tr>
+        <tr class="loading-row"><td colspan="6"><span class="spinner"></span>Memuat data...</td></tr>
       </tbody>
     </table>
   </div>

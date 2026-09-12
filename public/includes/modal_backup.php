@@ -20,7 +20,15 @@
         <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text);">Pulihkan dari File yang Di-download</h3>
         <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Upload file backup <code>.sqlite.bz2</code> dari komputer Anda untuk memulihkan database.</p>
         <form id="restoreUploadForm" style="display: flex; flex-direction: column; gap: 10px;">
-          <input type="file" name="backup_file" id="backupFileInput" accept=".sqlite.bz2,.bz2" required style="font-size: 13px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <label for="backupFileInput" class="btn btn--outline" style="flex-shrink: 0; cursor: pointer; padding: 10px 16px; font-size: 13px;">
+              📎 Pilih File
+            </label>
+            <span id="backupFileName" style="font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              Belum ada file
+            </span>
+          </div>
+          <input type="file" name="backup_file" id="backupFileInput" accept=".sqlite.bz2,.bz2" required style="display: none;">
           <button type="button" class="btn btn--full-wide" id="btnRestoreUpload" onclick="restoreUpload()">
             <span id="btnRestoreUploadText">🔄 Pulihkan dari File</span>
           </button>

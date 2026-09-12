@@ -198,6 +198,18 @@ body {
     color: var(--accent);
 }
 
+.btn--outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.btn--outline:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(59, 158, 255, .08);
+}
+
 /* Wrapper tombol di toolbar */
 .toolbar-actions {
     display: flex;
@@ -1377,6 +1389,96 @@ tr.row-selected td {
     border-radius: 12px;
     font-size: 16px;
     margin-top: 10px;
+}
+
+/* ── LOGIN PAGE SELECT DROPDOWN ── */
+.staffSelect,
+select.form-select {
+    width: 100%;
+    background: var(--surface2);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+    outline: none;
+    transition: border-color .2s;
+    margin-bottom: 16px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%237a94ac' viewBox='0 0 16 16'%3e%3cpath d='M7.247 11.14 2.451 5.656a.5.5 0 0 1 .708-.708l4.34 3.882L12.849 4.948a.5.5 0 1 1 .692.73l-5.31 5.5z'/%3E%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    background-size: 16px;
+}
+
+.staffSelect:focus,
+select.form-select:focus {
+    border-color: var(--accent);
+}
+
+/* ── FILE INPUT STYLING ── */
+input[type="file"] {
+    background: var(--surface2);
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+    width: 100%;
+}
+
+input[type="file"]:hover {
+    border-color: var(--accent);
+    background: rgba(59, 158, 255, .08);
+}
+
+input[type="file"]::file-selector-button {
+    display: none;
+}
+
+input[type="file"]::before {
+    content: attr(value) "📎 " attr(placeholder);
+    display: block;
+    text-align: center;
+}
+
+/* Custom file input that shows the file name */
+#backupFileInput {
+    background: var(--surface2);
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+    width: 100%;
+}
+
+#backupFileInput:hover {
+    border-color: var(--accent);
+    background: rgba(59, 158, 255, .08);
+    color: var(--text);
+}
+
+#backupFileInput::before {
+    content: "📎 Pilih file .sqlite.bz2";
+    display: block;
+    text-align: center;
+}
+
+/* Show file name when selected */
+#backupFileInput::after {
+    content: attr(data-filename);
+    display: block;
+    text-align: center;
+    font-size: 13px;
+    margin-top: 4px;
+    color: var(--text-muted);
 }
 
 .btn--full-wide {

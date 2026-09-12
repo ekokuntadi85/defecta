@@ -1,6 +1,11 @@
 <?php
 require_once 'config.php';
 $today = date('Y-m-d');
+$templateVars = [
+    'today' => $today,
+    'page'  => 'index',
+];
+extract($templateVars, EXTR_SKIP);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -44,20 +49,17 @@ $today = date('Y-m-d');
 
 <?php endif; ?>
 
-<script>
-  // Inisialisasi variabel global untuk JS
-  window.today = '<?= $today ?>';
-  
-  <?php if (is_logged_in()): ?>
-  // Memuat data awal jika sudah login
-  document.addEventListener('DOMContentLoaded', () => {
-    if (typeof loadList === 'function') {
-      loadList(1);
-    }
-  });
-  <?php endif; ?>
-</script>
-<script src="assets/js/app.js"></script>
+<?php include 'includes/scripts.php'; ?>
+
+<?php if (is_logged_in()): ?>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof loadList === 'function') {
+        loadList(1);
+      }
+    });
+  </script>
+<?php endif; ?>
 
 </body>
 </html>

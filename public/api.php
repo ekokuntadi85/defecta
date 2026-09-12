@@ -105,7 +105,7 @@ try {
 
             // Rows
             $stmt = $db->prepare("
-                SELECT id, tanggal, nama_obat, keterangan, status, updated_at
+                SELECT id, tanggal, nama_obat, keterangan, status, updated_at, created_by, updated_by
                 FROM defecta $where
                 ORDER BY updated_at DESC, id DESC
                 LIMIT :limit OFFSET :offset
@@ -146,7 +146,7 @@ try {
                 $params[':search'] = '%' . $search . '%';
             }
             $stmt = $db->prepare("
-                SELECT id, tanggal, nama_obat, keterangan, status, updated_at
+                SELECT id, tanggal, nama_obat, keterangan, status, updated_at, created_by, updated_by
                 FROM defecta $where
                 ORDER BY updated_at DESC, id DESC
             ");
@@ -390,7 +390,7 @@ try {
             // Rows
             $orderCol = ($mode === 'tersedia') ? 'updated_at' : 'tanggal';
             $stmt = $db->prepare("
-                SELECT id, tanggal, nama_obat, keterangan, status, created_at, updated_at
+                SELECT id, tanggal, nama_obat, keterangan, status, created_at, updated_at, created_by, updated_by
                 FROM defecta $where
                 ORDER BY $orderCol DESC, id DESC
                 LIMIT :limit OFFSET :offset

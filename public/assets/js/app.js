@@ -1030,6 +1030,29 @@ async function createBackup() {
     }
 }
 
+// ── FILE SELECTOR UI ─────────────────────
+function updateFileNameDisplay() {
+    const input = document.getElementById('backupFileInput');
+    const label = document.getElementById('backupFileName');
+    if (!input || !label) return;
+
+    if (input.files && input.files.length > 0) {
+        const f = input.files[0];
+        const sizeKB = (f.size / 1024).toFixed(1);
+        label.textContent = `${f.name} (${sizeKB} KB)`;
+    } else {
+        label.textContent = 'Belum ada file';
+    }
+}
+
+// Auto-display filename when user selects a file
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('backupFileInput');
+    if (input) {
+        input.addEventListener('change', updateFileNameDisplay);
+    }
+});
+
 function restoreUpload() {
     const input = document.getElementById('backupFileInput');
     const btn  = document.getElementById('btnRestoreUpload');

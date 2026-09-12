@@ -19,5 +19,5 @@ services:
 
 volumes:
   sqlite_data:
-    external:
-      name: defecta_sqlite_data
+    name: defecta_sqlite_data
+    external: true

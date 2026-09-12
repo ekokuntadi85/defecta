@@ -32,8 +32,8 @@ async function loadReport(page = 1) {
 
     const tbody = document.getElementById('reportTableBody');
     const mCards = document.getElementById('reportMobileCards');
-    tbody.innerHTML = `<tr class="loading-row"><td colspan="5"><span class="spinner"></span>Memuat data...</td></tr>`;
-    mCards.innerHTML = `<div style="text-align:center;padding:40px;opacity:.6;"><span class="spinner"></span></div>`;
+            tbody.innerHTML = `<tr class="loading-row"><td colspan="6"><span class="spinner"></span>Memuat data...</td></tr>`;
+            mCards.innerHTML = `<div style="text-align:center;padding:40px;opacity:.6;"><span class="spinner"></span></div>`;
 
     try {
         // Fetch data + summary in parallel
@@ -53,7 +53,7 @@ async function loadReport(page = 1) {
 
         // Render table
         if (dataJson.data.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5">
+            tbody.innerHTML = `<tr><td colspan="6">
                 <div class="empty-state" style="padding:40px">
                     <div class="empty-icon">📭</div>
                     <h3>Tidak ada data</h3>
@@ -69,8 +69,8 @@ async function loadReport(page = 1) {
         renderReportPagination(dataJson.page, dataJson.pages, dataJson.total);
 
     } catch (e) {
-        tbody.innerHTML = `<tr class="loading-row"><td colspan="5" style="color:var(--danger)">❌ Gagal: ${e.message}</td></tr>`;
-        mCards.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px;">❌ ${e.message}</div>`;
+            tbody.innerHTML = `<tr class="loading-row"><td colspan="6" style="color:var(--danger)">❌ Gagal: ${e.message}</td></tr>`;
+            mCards.innerHTML = `<div style="color:var(--danger);text-align:center;padding:20px;">❌ ${e.message}</div>`;
     }
 }
 
@@ -123,6 +123,7 @@ function renderReportTable(rows, page, limit) {
               <td class="td-drug">${escHtml(row.nama_obat)}</td>
               <td><span class="badge-ket ${ketClass}">${escHtml(row.keterangan)}</span></td>
               <td style="text-align:center"><span class="badge-status ${statusClass}">${statusLabel}</span></td>
+              <td style="font-size:12px;color:var(--text-muted)">${escHtml(row.created_by || '—')}</td>
             </tr>`,
             card: `
             <div class="mobile-card">
@@ -133,6 +134,7 @@ function renderReportTable(rows, page, limit) {
               <div class="mobile-card-meta">
                 <span>📅 ${tgl}</span>
                 <span class="badge-ket ${ketClass}" style="font-size:10px;padding:2px 8px">${escHtml(row.keterangan)}</span>
+                <span style="font-size:11px;color:var(--text-muted)">👤 ${escHtml(row.created_by || '—')}</span>
               </div>
             </div>`
         };
@@ -211,11 +213,12 @@ async function printReportLaporan() {
         const fromFormatted = formatDateLaporan(dateFrom);
         const toFormatted = formatDateLaporan(dateTo);
 
-        const tableRows = allRows.map((r, i) => {
+            const tableRows = allRows.map((r, i) => {
             const tgl = r.status === 'tersedia'
                 ? formatDateLaporan(r.updated_at?.split(' ')[0])
                 : formatDateLaporan(r.tanggal);
             const status = r.status === 'defecta' ? 'Defecta' : 'Tersedia';
+            const createdBy = r.created_by || '—';
             return `
             <tr>
               <td style="text-align:center;border:1px solid #000;">${i + 1}</td>
@@ -223,6 +226,7 @@ async function printReportLaporan() {
               <td style="font-weight:600;border:1px solid #000;">${r.nama_obat}</td>
               <td style="border:1px solid #000;">${r.keterangan}</td>
               <td style="text-align:center;border:1px solid #000;">${status}</td>
+              <td style="border:1px solid #000;">${createdBy}</td>
             </tr>`;
         }).join('');
 
@@ -277,6 +281,7 @@ async function printReportLaporan() {
       <th>Nama Obat</th>
       <th style="width:140px">Keterangan</th>
       <th style="width:90px;text-align:center">Status</th>
+      <th style="width:120px">Dibuat Oleh</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table>
