@@ -252,7 +252,7 @@ function renderTable(rows, page, limit) {
           <h3>${isRiwayat ? 'Belum ada riwayat terpenuhi.' : 'Semua obat tersedia!'}</h3>
           <p>${isRiwayat ? 'Tandai obat defecta sebagai tersedia terlebih dahulu.' : 'Tidak ada item defecta saat ini.'}</p>
         </div>`;
-        tbody.innerHTML = `<tr><td colspan="5">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6">${emptyMsg}</td></tr>`;
         mList.innerHTML = emptyMsg;
         return;
     }
@@ -265,6 +265,7 @@ function renderTable(rows, page, limit) {
         else if (row.keterangan === 'Penolakan') badgeClass = 'ket-tolak';
         const tgl = isRiwayat ? formatDate(row.updated_at?.split(' ')[0]) : formatDate(row.tanggal);
         const isChecked = selectedIds.has(row.id);
+        const staff = row.created_by || '—';
 
         // Desktop Action Btn (pakai data-* + delegation, aman dari XSS)
         const editBtn = `<button class="btn-edit" data-action="edit" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" data-tanggal="${escHtml(row.tanggal)}" data-ket="${escHtml(row.keterangan)}" title="Edit data">✏️</button>`;
@@ -282,6 +283,7 @@ function renderTable(rows, page, limit) {
           <td class="td-date">${tgl}</td>
           <td class="td-drug">${escHtml(row.nama_obat)}</td>
           <td class="td-notes"><span class="badge-ket ${badgeClass}">${ket}</span></td>
+          <td style="font-size:12px;color:var(--text-muted);text-align:center">${escHtml(staff)}</td>
           <td style="text-align:center"><div style="display:flex;gap:6px;justify-content:center;align-items:center;">${editBtn}${actionBtn}</div></td>
         </tr>`,
             card: `
@@ -293,6 +295,7 @@ function renderTable(rows, page, limit) {
           <div class="mobile-card-meta">
             <span>📅 ${tgl}</span>
             <span class="badge-ket ${badgeClass}" style="font-size:10px;padding:2px 8px">${ket}</span>
+            <span style="font-size:10px;color:var(--text-muted)">👤 ${escHtml(staff)}</span>
           </div>
           <div class="mobile-card-actions">
             <button class="mobile-card-edit" data-action="edit" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" data-tanggal="${escHtml(row.tanggal)}" data-ket="${escHtml(row.keterangan)}" title="Edit">✏️</button>
