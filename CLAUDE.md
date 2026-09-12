@@ -125,6 +125,7 @@ CREATE INDEX idx_login_ip ON login_attempts(ip, attempted_at);
 - Session fixation protection (`session_regenerate_id` on login)
 - Prepared statements everywhere (no SQL injection)
 - XSS prevention: `escHtml()` used for all dynamic content in JS, `htmlspecialchars` in PHP
+- No default PIN — APP_PASSWORD must be set via environment
 
 ### Timezone Handling
 - PHP: `Asia/Jakarta` (set in Dockerfile + config.php)

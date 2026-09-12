@@ -80,11 +80,11 @@ final class ApiSecurityTest extends TestCase
      */
     public function testPasswordComparisonIsTimingSafe(): void
     {
-        $correctPin = '1324';
+        $correctPin = 'test_pin_1234';
         $wrongPin   = '9999';
 
-        $this->assertTrue(is_string($correctPin) && hash_equals(APP_PASSWORD === '' ? '1324' : APP_PASSWORD, $correctPin) || $correctPin === '1324');
-        $this->assertFalse(is_string($wrongPin) && hash_equals(APP_PASSWORD === '' ? '1324' : APP_PASSWORD, $wrongPin) || $wrongPin === '1324');
+        $this->assertTrue(hash_equals(APP_PASSWORD, $correctPin));
+        $this->assertFalse(hash_equals(APP_PASSWORD, $wrongPin));
     }
 
     /**

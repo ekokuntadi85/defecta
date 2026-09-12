@@ -35,9 +35,10 @@ if ($action === 'login') {
     }
 
     $password = $_POST['password'] ?? '';
-    if (is_string($password) && hash_equals(APP_PASSWORD, $password)) {
+    if (is_string($password) && APP_PASSWORD !== '' && hash_equals(APP_PASSWORD, $password)) {
         session_regenerate_id(true); // cegah session fixation
         $_SESSION['logged_in'] = true;
+        $_SESSION['login_at']  = time();
         // Simpan nama staff bila dikirimkan (untuk audit trail)
         $staff = trim($_POST['staff_name'] ?? '');
         if ($staff !== '' && array_key_exists($staff, STAFF_LIST)) {
@@ -45,6 +46,10 @@ if ($action === 'login') {
         } else {
             set_staff('unknown');
         }
+        initDB();
+        $db = getDB();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        audit_log('LOGIN', null, null, 1, ['ip' => $ip]);
         echo json_encode([
             'success'    => true,
             'message'    => 'Login berhasil.',
@@ -54,7 +59,12 @@ if ($action === 'login') {
         $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
         $ins->execute([':ip' => $ip]);
         http_response_code(401);
-        echo json_encode(['success' => false, 'message' => 'PIN salah!']);
+        if (APP_PASSWORD === '') {
+            echo json_encode(['success' => false, 'message' => 'APP_PASSWORD belum dikonfigurasi. Hubungi administrator.']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'PIN salah!']);
+        }
+        exit;
     }
     exit;
 }
@@ -64,6 +74,8 @@ if ($action === 'logout') {
         http_response_code(405);
         exit;
     }
+    initDB();
+    audit_log('LOGOUT', null, null, 1, ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown']);
     session_destroy();
     echo json_encode(['success' => true, 'message' => 'Logout berhasil.']);
     exit;
@@ -217,8 +229,12 @@ try {
             }
 
             $stmt = $db->prepare("INSERT INTO defecta (tanggal, nama_obat, keterangan, status, created_at, updated_at, created_by, updated_by) VALUES (:tgl, :obat, :ket, 'defecta', :now, :now, :staff, :staff)");
+            $db->beginTransaction();
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':now' => now(), ':staff' => current_staff()]);
-            echo json_encode(['success' => true, 'message' => 'Data berhasil ditambahkan.', 'id' => (int)$db->lastInsertId()]);
+            $id = (int)$db->lastInsertId();
+            audit_log('CREATE', 'defecta', $id, 1, ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan]);
+            $db->commit();
+            echo json_encode(['success' => true, 'message' => 'Data berhasil ditambahkan.', 'id' => $id]);
             break;
 
         // ── TANDAI BANYAK OBAT TERSEDIA (defecta → tersedia) ───────
@@ -230,12 +246,14 @@ try {
                 break;
             }
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
-            $params = [':now' => now()];
+            $params = [':now' => now(), ':staff' => current_staff()];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
             $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='defecta'");
-            $stmt->execute(array_merge([':now' => now(), ':staff' => current_staff()], $params));
+            $db->beginTransaction();
             $stmt->execute($params);
             $n = $stmt->rowCount();
+            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'tersedia', 'ids' => $ids]);
+            $db->commit();
             echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
             break;
 
@@ -248,12 +266,14 @@ try {
                 break;
             }
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
-            $params = [':now' => now()];
+            $params = [':now' => now(), ':staff' => current_staff()];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
             $stmt = $db->prepare("UPDATE defecta SET status='defecta', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
-            $stmt->execute(array_merge([':now' => now(), ':staff' => current_staff()], $params));
+            $db->beginTransaction();
             $stmt->execute($params);
             $n = $stmt->rowCount();
+            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'defecta', 'ids' => $ids]);
+            $db->commit();
             echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
             break;
 
@@ -265,10 +285,19 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Tidak ada ID yang dipilih.']);
                 break;
             }
+            // Capture rows before delete for audit
             $ph   = implode(',', array_fill(0, count($ids), '?'));
-            $stmt = $db->prepare("DELETE FROM defecta WHERE id IN ($ph)");
-            $stmt->execute(array_values($ids));
-            $n = $stmt->rowCount();
+            $sel  = $db->prepare("SELECT id, nama_obat, keterangan FROM defecta WHERE id IN ($ph)");
+            $sel->execute(array_values($ids));
+            $deletedRows = $sel->fetchAll(PDO::FETCH_ASSOC);
+            $db->beginTransaction();
+            $del = $db->prepare("DELETE FROM defecta WHERE id IN ($ph)");
+            $del->execute(array_values($ids));
+            $n = $del->rowCount();
+            foreach ($deletedRows as $row) {
+                audit_log('DELETE', 'defecta', $row['id'], 1, $row);
+            }
+            $db->commit();
             echo json_encode(['success' => true, 'message' => "{$n} item berhasil dihapus.", 'affected' => $n]);
             break;
 
@@ -317,23 +346,36 @@ try {
                 break;
             }
 
+            // Capture old values before update
+            $oldRow = $db->query("SELECT tanggal, nama_obat, keterangan, status FROM defecta WHERE id = " . (int)$id)->fetch(PDO::FETCH_ASSOC);
             $stmt = $db->prepare("
                 UPDATE defecta
                 SET tanggal = :tgl, nama_obat = :obat, keterangan = :ket, updated_at = :now, updated_by = :staff
                 WHERE id = :id
             ");
+            $db->beginTransaction();
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':id' => $id, ':now' => now(), ':staff' => current_staff()]);
+            audit_log('UPDATE', 'defecta', $id, 1, ['old' => $oldRow ?: null, 'new' => ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan]]);
+            $db->commit();
 
             echo json_encode(['success' => true, 'message' => 'Data berhasil diperbarui.']);
             break;
 
         // ── TANDAI SATU OBAT TERSEDIA ──────────────────────────────
-        case 'tersedia':
+         case 'tersedia':
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'ID tidak valid.']); break; }
+            // Capture old status for audit
+            $oldRow = $db->query("SELECT status FROM defecta WHERE id = " . (int)$id)->fetch(PDO::FETCH_ASSOC);
             $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id=:id AND status='defecta'");
+            $db->beginTransaction();
             $stmt->execute([':id' => $id, ':now' => now(), ':staff' => current_staff()]);
-            echo $stmt->rowCount() > 0
+            if ($stmt->rowCount() > 0) {
+                audit_log('STATUS_CHANGE', 'defecta', $id, 1, ['old' => ['status' => $oldRow ? $oldRow['status'] : 'unknown'], 'new' => ['status' => 'tersedia']]);
+            }
+            $n = $stmt->rowCount();
+            $db->commit();
+            echo $n > 0
                 ? json_encode(['success' => true,  'message' => 'Status diperbarui menjadi tersedia.'])
                 : json_encode(['success' => false, 'message' => 'Data tidak ditemukan.']);
             break;
@@ -482,26 +524,50 @@ try {
             $filename  = "defecta-{$timestamp}.sqlite.bz2";
             $dest      = $backupDir . '/' . $filename;
 
-            // Baca file SQLite, kompresi dengan bzip2 (level 9 = max)
-            $data = file_get_contents($src);
-            if ($data === false) {
+            // Use VACUUM INTO for a consistent snapshot (WAL-safe).
+            // VACUUM INTO creates a new SQLite file with all WAL data merged.
+            $vacuumDest = $backupDir . '/' . $timestamp . '.sqlite';
+            // Ensure no stale file
+            @unlink($vacuumDest);
+            $db->exec("VACUUM INTO '" . addslashes($vacuumDest) . "'");
+
+            // Validate the snapshot
+            try {
+                validate_database_backup($vacuumDest);
+            } catch (Throwable $e) {
+                @unlink($vacuumDest);
                 http_response_code(500);
-                echo json_encode(['success' => false, 'message' => 'Gagal membaca database.']);
+                echo json_encode(['success' => false, 'message' => 'Snapshot tidak valid.']);
+                break;
+            }
+
+            // Read the consistent snapshot, compress, write backup
+            $data = file_get_contents($vacuumDest);
+            if ($data === false) {
+                @unlink($vacuumDest);
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal membaca snapshot database.']);
                 break;
             }
             $compressed = bzcompress($data, 9);
             if ($compressed === false) {
+                @unlink($vacuumDest);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal mengompresi backup.']);
                 break;
             }
             if (file_put_contents($dest, $compressed) === false) {
+                @unlink($vacuumDest);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal menyimpan backup.']);
                 break;
             }
 
+            // Clean up the temporary snapshot
+            @unlink($vacuumDest);
+
             $size = filesize($dest);
+            audit_log('BACKUP', null, null, 1, ['filename' => $filename, 'size' => $size]);
             echo json_encode([
                 'success'    => true,
                 'message'    => 'Backup berhasil dibuat.',
@@ -616,41 +682,58 @@ try {
             }
             $data = bzdecompress($compressed);
             if ($data === false) {
-                http_response_code(500);
+                http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Gagal mengekstrak backup (file korup?).']);
                 break;
             }
 
-            // Tulis ke file temporary & verifikasi integritas SQLite
+            // Tulis ke file temporary & validasi penuh
             $tmp = $src . '.tmp.' . bin2hex(random_bytes(8));
             if (file_put_contents($tmp, $data) === false) {
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal menulis file temporary.']);
                 break;
             }
+            unset($data, $compressed);
 
-            // Verifikasi: coba buka sebagai SQLite & cek tabel defecta ada
             try {
-                $pdo = new PDO('sqlite:' . $tmp, null, null, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                ]);
-                $pdo->exec('PRAGMA busy_timeout=5000');
-                $chk = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='defecta'")->fetch();
-                if (!$chk) {
-                    @unlink($tmp);
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'Backup tidak valid: tabel defecta tidak ditemukan.']);
-                    break;
-                }
-            } catch (PDOException $e) {
+                validate_database_backup($tmp);
+            } catch (Throwable $e) {
                 @unlink($tmp);
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'Backup tidak valid: ' . $e->getMessage()]);
+                echo json_encode(['success' => false, 'message' => 'Backup tidak valid.']);
                 break;
             }
 
-            // Atomic replace: rename temporary file ke database utama
-            // (rename adalah atomic di POSIX)
+            // Backup database lama sebelum replace (VACUUM INTO for WAL-consistency)
+            if (is_file($src)) {
+                $bkName = 'defecta-pre-restore-' . date('Ymd-His') . '.sqlite.bz2';
+                $bkPath = $backupDir . '/' . $bkName;
+                if (!is_dir($backupDir)) {
+                    @mkdir($backupDir, 0755, true);
+                }
+                $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore.sqlite';
+                @unlink($oldSnapshot);
+                $db->exec("VACUUM INTO '" . addslashes($oldSnapshot) . "'");
+                $oldData = @file_get_contents($oldSnapshot);
+                @unlink($oldSnapshot);
+                if ($oldData !== false) {
+                    $oldCompressed = bzcompress($oldData, 9);
+                    if ($oldCompressed !== false) {
+                        file_put_contents($bkPath, $oldCompressed);
+                    }
+                }
+                unset($oldData, $oldCompressed);
+            }
+
+            // Release the database connection before file replacement
+            $db = null;
+
+            // Clear WAL/SHM files before replace (prevent stale WAL data)
+            @unlink($src . '-wal');
+            @unlink($src . '-shm');
+
+            // Atomic replace
             if (!rename($tmp, $src)) {
                 @unlink($tmp);
                 http_response_code(500);
@@ -658,8 +741,9 @@ try {
                 break;
             }
 
-            // Reset koneksi PDO singleton agar pakai DB baru
-            // (getDB() pakai static $pdo, jadi butuh reload halaman)
+            $totalRows = (int)(new PDO('sqlite:' . $src))->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
+            audit_log('RESTORE', null, null, 1, ['filename' => $file, 'total_rows' => $totalRows]);
+
             echo json_encode([
                 'success' => true,
                 'message' => 'Database berhasil dipulihkan. Halaman akan dimuat ulang.',
@@ -724,33 +808,22 @@ try {
                 break;
             }
 
-            // Verifikasi: cek apakah file .sqlite valid & punya tabel defecta
+            // Full validation using validate_database_backup()
             try {
-                $pdo = new PDO('sqlite:' . $tmp, null, null, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                ]);
-                $pdo->exec('PRAGMA busy_timeout=5000');
-                // Cek versi file SQLite
-                $hdr = $pdo->query("PRAGMA journal_mode")->fetchColumn();
-                // Cek tabel defecta ada
-                $chk = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='defecta'")->fetch();
-                if (!$chk) {
-                    @unlink($tmp);
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'Database tidak valid: tabel defecta tidak ditemukan.']);
-                    break;
-                }
-                // Hitung total data
-                $totalRows = (int)$pdo->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
-                unset($pdo);
-            } catch (PDOException $e) {
+                validate_database_backup($tmp);
+            } catch (Throwable $ve) {
                 @unlink($tmp);
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'Database tidak valid: ' . $e->getMessage()]);
+                echo json_encode(['success' => false, 'message' => 'Database tidak valid.']);
                 break;
             }
 
-            // Backup database lama sebelum replace (simpan di backups/)
+            // Count rows for the response
+            $countDb = new PDO('sqlite:' . $tmp, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $totalRows = (int)$countDb->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
+            unset($countDb);
+
+            // Backup database lama sebelum replace (VACUUM INTO for WAL-consistency)
             $backupDir = dirname($src) . '/backups';
             if (!is_dir($backupDir)) {
                 @mkdir($backupDir, 0755, true);
@@ -758,14 +831,26 @@ try {
             if (is_file($src)) {
                 $bkName = 'defecta-pre-restore-' . date('Ymd-His') . '.sqlite.bz2';
                 $bkPath = $backupDir . '/' . $bkName;
-                $oldData = file_get_contents($src);
+                $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore-upload.sqlite';
+                @unlink($oldSnapshot);
+                $db->exec("VACUUM INTO '" . addslashes($oldSnapshot) . "'");
+                $oldData = @file_get_contents($oldSnapshot);
+                @unlink($oldSnapshot);
                 if ($oldData !== false) {
                     $oldCompressed = bzcompress($oldData, 9);
                     if ($oldCompressed !== false) {
                         file_put_contents($bkPath, $oldCompressed);
                     }
                 }
+                unset($oldData, $oldCompressed);
             }
+
+            // Release the database connection before file replacement
+            $db = null;
+
+            // Clear WAL/SHM files
+            @unlink($src . '-wal');
+            @unlink($src . '-shm');
 
             // Atomic replace
             if (!rename($tmp, $src)) {
@@ -774,6 +859,8 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Gagal mengganti database.']);
                 break;
             }
+
+            audit_log('RESTORE', null, null, 1, ['source' => 'upload', 'total_rows' => $totalRows]);
 
             echo json_encode([
                 'success'    => true,
