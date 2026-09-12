@@ -654,9 +654,125 @@ try {
             ]);
             break;
 
+        // ── BACKUP: RESTORE DARI FILE YANG DI-UPLOAD ────────────────────
+        // Memungkinkan upload file .sqlite.bz2 (mis. yang sudah didownload
+        // dari server lain) dan restore ke database lokal.
+        case 'backup_restore_upload':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['success' => false, 'message' => 'Method not allowed.']);
+                break;
+            }
+            if (!isset($_FILES['backup_file']) || $_FILES['backup_file']['error'] === UPLOAD_ERR_NO_FILE) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Tidak ada file yang diupload.']);
+                break;
+            }
+            $f = $_FILES['backup_file'];
+            if ($f['error'] !== UPLOAD_ERR_OK) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Upload gagal. Kode error: ' . $f['error']]);
+                break;
+            }
+            // Validasi ekstensi: .sqlite.bz2 (dipaksa) atau .bz2
+            $origName = $f['name'];
+            $extOk = str_ends_with($origName, '.sqlite.bz2') || str_ends_with($origName, '.bz2');
+            if (!$extOk) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Format file tidak didukung. Hanya file .sqlite.bz2 yang diizinkan.']);
+                break;
+            }
+            // Validasi ukuran (max 50 MB)
+            $maxSize = 50 * 1024 * 1024;
+            if ($f['size'] > $maxSize) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'File terlalu besar. Maksimal 50 MB.']);
+                break;
+            }
+            // Baca isi file yang diupload
+            $compressed = file_get_contents($f['tmp_name']);
+            if ($compressed === false) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal membaca file upload.']);
+                break;
+            }
+            $data = bzdecompress($compressed);
+            if ($data === false) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Gagal mengekstrak file (bukan bzip2 atau file korup).']);
+                break;
+            }
+
+            $src = getenv('DB_SQLITE_PATH') ?: (__DIR__ . '/data/defecta.sqlite');
+            $tmp = $src . '.tmp.' . bin2hex(random_bytes(8));
+            if (file_put_contents($tmp, $data) === false) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal menulis file temporary.']);
+                break;
+            }
+
+            // Verifikasi: cek apakah file .sqlite valid & punya tabel defecta
+            try {
+                $pdo = new PDO('sqlite:' . $tmp, null, null, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                ]);
+                $pdo->exec('PRAGMA busy_timeout=5000');
+                // Cek versi file SQLite
+                $hdr = $pdo->query("PRAGMA journal_mode")->fetchColumn();
+                // Cek tabel defecta ada
+                $chk = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='defecta'")->fetch();
+                if (!$chk) {
+                    @unlink($tmp);
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'Database tidak valid: tabel defecta tidak ditemukan.']);
+                    break;
+                }
+                // Hitung total data
+                $totalRows = (int)$pdo->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
+                unset($pdo);
+            } catch (PDOException $e) {
+                @unlink($tmp);
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Database tidak valid: ' . $e->getMessage()]);
+                break;
+            }
+
+            // Backup database lama sebelum replace (simpan di backups/)
+            $backupDir = dirname($src) . '/backups';
+            if (!is_dir($backupDir)) {
+                @mkdir($backupDir, 0755, true);
+            }
+            if (is_file($src)) {
+                $bkName = 'defecta-pre-restore-' . date('Ymd-His') . '.sqlite.bz2';
+                $bkPath = $backupDir . '/' . $bkName;
+                $oldData = file_get_contents($src);
+                if ($oldData !== false) {
+                    $oldCompressed = bzcompress($oldData, 9);
+                    if ($oldCompressed !== false) {
+                        file_put_contents($bkPath, $oldCompressed);
+                    }
+                }
+            }
+
+            // Atomic replace
+            if (!rename($tmp, $src)) {
+                @unlink($tmp);
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal mengganti database.']);
+                break;
+            }
+
+            echo json_encode([
+                'success'    => true,
+                'message'    => 'Database berhasil dipulihkan dari file upload. Halaman akan dimuat ulang.',
+                'reload'     => true,
+                'total_rows' => $totalRows,
+            ]);
+            break;
+
         default:
             http_response_code(400);
-            echo json_encode(['success' => false, 'message' => 'Aksi tidak dikenali.']);
+            echo json_encode(['success' => false, 'message' => 'Aksi tidak dikenal.']);
     }
 
 } catch (PDOException $e) {

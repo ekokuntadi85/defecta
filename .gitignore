@@ -11,3 +11,4 @@ backups/
 Thumbs.db
 .claude/settings.local.json
 *-check-this-codebase.txt
+defecta.sqlite

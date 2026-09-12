@@ -1027,6 +1027,54 @@ async function createBackup() {
     }
 }
 
+async function restoreUpload() {
+    const input = document.getElementById('backupFileInput');
+    const btn  = document.getElementById('btnRestoreUpload');
+    const txt  = document.getElementById('btnRestoreUploadText');
+
+    if (!input.files || input.files.length === 0) {
+        showToast('❌ Pilih file .sqlite.bz2 terlebih dahulu.', 'error');
+        return;
+    }
+
+    const file = input.files[0];
+    if (!file.name.endsWith('.sqlite.bz2') && !file.name.endsWith('.bz2')) {
+        showToast('❌ Hanya file .sqlite.bz2 yang diizinkan.', 'error');
+        return;
+    }
+
+    const confirmed = await confirmAction(
+        `Pulihkan database dari file "${file.name}"?` +
+        ' Data saat ini akan diganti dan backup otomatis akan dibuat.'
+    );
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    txt.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Memulihkan...';
+
+    try {
+        const fd = new FormData();
+        fd.append('action', 'backup_restore_upload');
+        fd.append('csrf_token', csrfToken());
+        fd.append('backup_file', file);
+
+        const res = await fetch('api.php', { method: 'POST', body: fd });
+        const json = await res.json();
+
+        if (!json.success) throw new Error(json.message);
+
+        showToast('✅ ' + json.message, 'success');
+
+        if (json.reload) {
+            setTimeout(() => location.reload(), 1000);
+        }
+    } catch (e) {
+        showToast('❌ Gagal restore: ' + e.message, 'error');
+        btn.disabled = false;
+        txt.innerHTML = '🔄 Pulihkan dari File';
+    }
+}
+
 async function loadBackupList() {
     const tbody = document.getElementById('backupTableBody');
     const empty = document.getElementById('backupEmpty');

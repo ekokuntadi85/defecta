@@ -15,8 +15,19 @@
         </button>
       </div>
 
+      <!-- Upload & Restore Section -->
+      <div style="padding: 16px; background: var(--surface2); border-radius: 8px; border: 1px dashed var(--border);">
+        <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text);">Pulihkan dari File yang Di-download</h3>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Upload file backup <code>.sqlite.bz2</code> dari komputer Anda untuk memulihkan database.</p>
+        <form id="restoreUploadForm" style="display: flex; flex-direction: column; gap: 10px;">
+          <input type="file" name="backup_file" id="backupFileInput" accept=".sqlite.bz2,.bz2" required style="font-size: 13px;">
+          <button type="button" class="btn btn--full-wide" id="btnRestoreUpload" onclick="restoreUpload()">
+            <span id="btnRestoreUploadText">🔄 Pulihkan dari File</span>
+          </button>
+        </form>
+      </div>
+
       <!-- Backup List Section -->
-      <div>
         <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text);">Daftar Backup</h3>
         <div class="table-wrap" style="max-height: 300px; overflow-y: auto;">
           <table>
