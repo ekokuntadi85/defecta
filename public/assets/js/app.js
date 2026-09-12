@@ -92,6 +92,7 @@ async function bulkAction() {
         const fd = new FormData();
         fd.append('action', apiAction);
         fd.append('ids', ids.join(','));
+        fd.append('csrf_token', csrfToken());
         const res = await fetch('api.php', { method: 'POST', body: fd });
         const json = await res.json();
         if (!json.success) throw new Error(json.message);
@@ -120,6 +121,7 @@ async function bulkDelete() {
             const fd = new FormData();
             fd.append('action', 'bulk_delete');
             fd.append('ids', ids.join(','));
+            fd.append('csrf_token', csrfToken());
             const res = await fetch('api.php', { method: 'POST', body: fd });
             const json = await res.json();
             if (!json.success) throw new Error(json.message);
@@ -198,7 +200,7 @@ function switchMode(mode) {
 }
 
 // ── FETCH LIST ─────────────────────────────
-async function loadList(page = 1, search = '') {
+async function loadList(page = 1, search = currentSearch) {
     currentPage = page;
     currentSearch = search;
 
@@ -264,19 +266,18 @@ function renderTable(rows, page, limit) {
         const tgl = isRiwayat ? formatDate(row.updated_at?.split(' ')[0]) : formatDate(row.tanggal);
         const isChecked = selectedIds.has(row.id);
 
-        // Desktop Action Btn
-        const safeObat = escHtml(row.nama_obat).replace(/'/g, "\\'");
-        const editBtn = `<button class="btn-edit" onclick="openEditModal(${row.id},'${safeObat}','${row.tanggal}','${escHtml(row.keterangan).replace(/'/g, "\\'")}'  )" title="Edit data">✏️</button>`;
+        // Desktop Action Btn (pakai data-* + delegation, aman dari XSS)
+        const editBtn = `<button class="btn-edit" data-action="edit" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" data-tanggal="${escHtml(row.tanggal)}" data-ket="${escHtml(row.keterangan)}" title="Edit data">✏️</button>`;
         const actionBtn = isRiwayat
-            ? `<button class="btn-check" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)" onclick="markSingle(${row.id},'${safeObat}','defecta',this)" title="Kembalikan ke Defecta"><span style="color:var(--danger)">↩</span></button>`
-            : `<button class="btn-check" onclick="markSingle(${row.id},'${safeObat}','tersedia',this)" title="Tandai Tersedia" id="chk-${row.id}"><span>✓</span></button>`;
+            ? `<button class="btn-check" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)" data-action="undo" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Kembalikan ke Defecta"><span style="color:var(--danger)">↩</span></button>`
+            : `<button class="btn-check" data-action="done" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Tandai Tersedia" id="chk-${row.id}"><span>✓</span></button>`;
 
         return {
             id: row.id,
             html: `
         <tr id="row-${row.id}" class="${isChecked ? 'row-selected' : ''}">
           <td class="td-no" style="text-align:center">
-            <input type="checkbox" class="row-cb" data-id="${row.id}" ${isChecked ? 'checked' : ''} onchange="toggleRow(this)">
+            <input type="checkbox" class="row-cb" data-id="${row.id}" ${isChecked ? 'checked' : ''}>
           </td>
           <td class="td-date">${tgl}</td>
           <td class="td-drug">${escHtml(row.nama_obat)}</td>
@@ -284,20 +285,20 @@ function renderTable(rows, page, limit) {
           <td style="text-align:center"><div style="display:flex;gap:6px;justify-content:center;align-items:center;">${editBtn}${actionBtn}</div></td>
         </tr>`,
             card: `
-        <div class="mobile-card ${isChecked ? 'row-selected' : ''}" id="card-${row.id}" onclick="handleCardClick(this, ${row.id}, event)">
+        <div class="mobile-card ${isChecked ? 'row-selected' : ''}" id="card-${row.id}" data-card-id="${row.id}">
           <div class="mobile-card-header">
             <div class="mobile-card-title">${escHtml(row.nama_obat)}</div>
-            <input type="checkbox" class="row-cb" style="width:20px;height:20px;" data-id="${row.id}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleRow(this)">
+            <input type="checkbox" class="row-cb" style="width:20px;height:20px;" data-id="${row.id}" ${isChecked ? 'checked' : ''}>
           </div>
           <div class="mobile-card-meta">
             <span>📅 ${tgl}</span>
             <span class="badge-ket ${badgeClass}" style="font-size:10px;padding:2px 8px">${ket}</span>
           </div>
           <div class="mobile-card-actions">
-            <button class="mobile-card-edit" onclick="event.stopPropagation(); openEditModal(${row.id},'${safeObat}','${row.tanggal}','${escHtml(row.keterangan).replace(/'/g, "\\'")}'  )" title="Edit">✏️</button>
+            <button class="mobile-card-edit" data-action="edit" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" data-tanggal="${escHtml(row.tanggal)}" data-ket="${escHtml(row.keterangan)}" title="Edit">✏️</button>
             ${isRiwayat
-                    ? `<button class="mobile-card-check btn-undo" onclick="event.stopPropagation(); markSingle(${row.id},'${safeObat}','defecta',this)">↩ Kembalikan ke Defecta</button>`
-                    : `<button class="mobile-card-check" onclick="event.stopPropagation(); markSingle(${row.id},'${safeObat}','tersedia',this)">✅ Tandai Tersedia</button>`
+                    ? `<button class="mobile-card-check btn-undo" data-action="undo" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}">↩ Kembalikan ke Defecta</button>`
+                    : `<button class="mobile-card-check" data-action="done" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}">✅ Tandai Tersedia</button>`
                 }
           </div>
         </div>`
@@ -308,13 +309,36 @@ function renderTable(rows, page, limit) {
     mList.innerHTML = htmlRows.map(r => r.card).join('');
 }
 
-// Tambahan Mobile interaction
-function handleCardClick(el, id, e) {
-    // Jika klik pada tombol atau checkbox, jangan toggle select seluruh card
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('button')) return;
+// Aksi tombol via event delegation (data-*), aman dari XSS
+function handleActionClick(e) {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id    = parseInt(btn.dataset.id, 10);
+    const nama  = btn.dataset.nama || '';
+    if (isNaN(id)) return;
 
-    const cb = el.querySelector('.row-cb');
-    if (cb) {
+    switch (btn.dataset.action) {
+        case 'edit':
+            openEditModal(id, nama, btn.dataset.tanggal || '', btn.dataset.ket || '');
+            break;
+        case 'done':
+            confirmMarkSingle(id, nama, 'tersedia', btn);
+            break;
+        case 'undo':
+            confirmMarkSingle(id, nama, 'defecta', btn);
+            break;
+    }
+}
+
+// Tambahan Mobile interaction (klik kartu = toggle seleksi)
+function handleCardClick(e) {
+    const card = e.target.closest('.mobile-card');
+    if (!card) return;
+    if (e.target.closest('button') || e.target.closest('input')) return;
+
+    const id = parseInt(card.dataset.cardId, 10);
+    const cb = card.querySelector('.row-cb');
+    if (cb && !isNaN(id)) {
         cb.checked = !cb.checked;
         toggleRow(cb);
     }
@@ -326,19 +350,19 @@ function renderPagination(page, pages, total) {
     if (pages <= 1) { el.innerHTML = ''; return; }
 
     let html = '';
-    html += `<button class="page-btn" onclick="loadList(${page - 1},'${currentSearch}')" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button>`;
+    html += `<button class="page-btn" onclick="loadList(${page - 1})" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button>`;
 
     // Show limited range of pages
     let start = Math.max(1, page - 2);
     let end = Math.min(pages, page + 2);
-    if (start > 1) html += `<button class="page-btn" onclick="loadList(1,'${currentSearch}')">1</button>${start > 2 ? '<span class="page-info">…</span>' : ''}`;
+    if (start > 1) html += `<button class="page-btn" onclick="loadList(1)">1</button>${start > 2 ? '<span class="page-info">…</span>' : ''}`;
 
     for (let i = start; i <= end; i++) {
-        html += `<button class="page-btn ${i === page ? 'active' : ''}" onclick="loadList(${i},'${currentSearch}')">${i}</button>`;
+        html += `<button class="page-btn ${i === page ? 'active' : ''}" onclick="loadList(${i})">${i}</button>`;
     }
-    if (end < pages) html += `${end < pages - 1 ? '<span class="page-info">…</span>' : ''}<button class="page-btn" onclick="loadList(${pages},'${currentSearch}')">${pages}</button>`;
+    if (end < pages) html += `${end < pages - 1 ? '<span class="page-info">…</span>' : ''}<button class="page-btn" onclick="loadList(${pages})">${pages}</button>`;
 
-    html += `<button class="page-btn" onclick="loadList(${page + 1},'${currentSearch}')" ${page >= pages ? 'disabled' : ''}>Next ›</button>`;
+    html += `<button class="page-btn" onclick="loadList(${page + 1})" ${page >= pages ? 'disabled' : ''}>Next ›</button>`;
     html += `<span class="page-info">Total: ${total}</span>`;
     el.innerHTML = html;
 }
@@ -351,7 +375,7 @@ function formatDate(str) {
 }
 
 // ── MARK SINGLE (Bidirectional) ──────────────
-function markSingle(id, namaObat, targetStatus, btn) {
+function confirmMarkSingle(id, namaObat, targetStatus, btn) {
     const isKeDefecta = targetStatus === 'defecta';
     const msg = isKeDefecta
         ? `Kembalikan "${namaObat}" ke daftar defecta?`
@@ -366,6 +390,7 @@ function markSingle(id, namaObat, targetStatus, btn) {
             const fd = new FormData();
             fd.append('action', isKeDefecta ? 'bulk_defecta' : 'tersedia');
             fd.append(isKeDefecta ? 'ids' : 'id', id);
+            fd.append('csrf_token', csrfToken());
 
             const res = await fetch('api.php', { method: 'POST', body: fd });
             const json = await res.json();
@@ -431,6 +456,7 @@ function openModal() {
     if (fKetLainnyaEl) fKetLainnyaEl.value = '';
 
     closeAutocomplete();
+    updateDefectaWarning(null);
 
     const modalOverlayEl = document.getElementById('modalOverlay');
     if (modalOverlayEl) modalOverlayEl.classList.add('open');
@@ -472,24 +498,57 @@ async function fetchAutocomplete(q) {
     if (!dropdown) return;
 
     try {
-        const res = await fetch(`api.php?action=search_tersedia&q=${encodeURIComponent(q)}`);
+        const res = await fetch(`api.php?action=search_obat&q=${encodeURIComponent(q)}`);
         const json = await res.json();
         acItems = json.data || [];
         acIndex = -1;
+
         if (acItems.length === 0) {
             dropdown.innerHTML = `<div class="autocomplete-empty">Tidak ada riwayat – tulis bebas</div>`;
         } else {
-            dropdown.innerHTML = acItems.map((it, i) =>
-                `<div class="autocomplete-item" data-i="${i}" onmousedown="selectAc(${i})">${escHtml(it)}</div>`
-            ).join('');
+            dropdown.innerHTML = acItems.map((it, i) => {
+                if (it.status === 'defecta') {
+                    return `<div class="autocomplete-item autocomplete-warn" title="Sudah di daftar Defecta">⚠️ ${escHtml(it.nama)}</div>`;
+                }
+                return `<div class="autocomplete-item" data-i="${i}" onmousedown="selectAc(${i})">${escHtml(it.nama)}</div>`;
+            }).join('');
         }
+
+        // Deteksi kecocokan persis dengan obat yang sedang Defecta
+        const qLower = q.trim().toLowerCase();
+        const exactDefecta = acItems.find(it =>
+            it.status === 'defecta' && it.nama.trim().toLowerCase() === qLower
+        );
+        updateDefectaWarning(exactDefecta ? exactDefecta.nama : null);
+
         dropdown.classList.add('open');
     } catch (e) { }
 }
 
+// Peringatan inline: nama sudah ada di daftar Defecta (blokir submit)
+let defectaLock = false;
+
+function updateDefectaWarning(nama) {
+    const el = document.getElementById('dupeWarn');
+    const btn = document.getElementById('submitBtn');
+    defectaLock = !!nama;
+    if (el) {
+        if (nama) {
+            el.style.display = 'flex';
+            el.innerHTML = `⚠️ <b>${escHtml(nama)}</b> sudah ada di daftar Defecta. Tidak bisa ditambahkan dua kali.`;
+        } else {
+            el.style.display = 'none';
+            el.innerHTML = '';
+        }
+    }
+    if (btn) btn.disabled = defectaLock;
+}
+
 function selectAc(i) {
+    const item = acItems[i];
+    if (!item || item.status !== 'tersedia') return;
     const drugInput = document.getElementById('f-obat');
-    if (drugInput) drugInput.value = acItems[i];
+    if (drugInput) drugInput.value = item.nama;
     closeAutocomplete();
 }
 
@@ -523,6 +582,10 @@ async function submitForm(e) {
         showToast('⚠️ Nama obat wajib diisi.', 'error');
         return;
     }
+    if (defectaLock) {
+        showToast('⚠️ Obat ini sudah ada di daftar Defecta.', 'error');
+        return;
+    }
 
     const btn = document.getElementById('submitBtn');
     const text = document.getElementById('submitBtnText');
@@ -535,6 +598,7 @@ async function submitForm(e) {
         fd.append('tanggal', document.getElementById('f-tanggal').value);
         fd.append('nama_obat', namaObat);
         fd.append('keterangan', keterangan);
+        fd.append('csrf_token', csrfToken());
 
         const res = await fetch('api.php', { method: 'POST', body: fd });
         const json = await res.json();
@@ -832,6 +896,7 @@ async function submitEdit(e) {
         fd.append('tanggal',    tanggal);
         fd.append('nama_obat',  namaObat);
         fd.append('keterangan', keterangan);
+        fd.append('csrf_token', csrfToken());
 
         const res  = await fetch('api.php', { method: 'POST', body: fd });
         const json = await res.json();
@@ -863,6 +928,7 @@ async function doLogin() {
         const params = new URLSearchParams();
         params.append('action', 'login');
         params.append('password', pin);
+        params.append('csrf_token', csrfToken());
 
         console.log('[Auth] Mengirim request ke ./api.php');
         const res = await fetch('./api.php', {
@@ -908,8 +974,211 @@ async function doLogin() {
 
 async function doLogout() {
     if (!confirm('Logout dari aplikasi?')) return;
-    await fetch('api.php?action=logout');
+    const fd = new FormData();
+    fd.append('action', 'logout');
+    fd.append('csrf_token', csrfToken());
+    await fetch('api.php', { method: 'POST', body: fd });
     location.reload();
+}
+
+// ── CSRF ────────────────────────────────────
+function csrfToken() {
+    const m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.content : '';
+}
+
+// ── BACKUP / RESTORE ────────────────────────
+function openBackupModal() {
+    const overlay = document.getElementById('backupModalOverlay');
+    if (overlay) overlay.classList.add('open');
+    loadBackupList();
+}
+
+function closeBackupModal() {
+    const overlay = document.getElementById('backupModalOverlay');
+    if (overlay) overlay.classList.remove('open');
+}
+
+async function createBackup() {
+    const btn = document.getElementById('btnCreateBackup');
+    const text = document.getElementById('btnCreateBackupText');
+    if (!btn || !text) return;
+
+    btn.disabled = true;
+    text.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Membuat...';
+
+    try {
+        const fd = new FormData();
+        fd.append('action', 'backup_create');
+        fd.append('csrf_token', csrfToken());
+
+        const res = await fetch('api.php', { method: 'POST', body: fd });
+        const json = await res.json();
+
+        if (!json.success) throw new Error(json.message);
+
+        showToast('✅ ' + json.message, 'success');
+        loadBackupList();
+    } catch (e) {
+        showToast('❌ Gagal membuat backup: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        text.innerHTML = '💾 Buat Backup';
+    }
+}
+
+async function loadBackupList() {
+    const tbody = document.getElementById('backupTableBody');
+    const empty = document.getElementById('backupEmpty');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr class="loading-row"><td colspan="4"><span class="spinner"></span>Memuat daftar backup...</td></tr>`;
+    if (empty) empty.style.display = 'none';
+
+    try {
+        const res = await fetch('api.php?action=backup_list');
+        const json = await res.json();
+
+        if (!json.success) throw new Error(json.message);
+
+        if (!json.data || json.data.length === 0) {
+            tbody.innerHTML = '';
+            if (empty) empty.style.display = 'block';
+            return;
+        }
+
+        if (empty) empty.style.display = 'none';
+
+        tbody.innerHTML = json.data.map(item => {
+            const sizeKB = (item.size / 1024).toFixed(1);
+            return `
+            <tr>
+              <td style="font-family: monospace; font-size: 12px;">${escHtml(item.filename)}</td>
+              <td style="text-align: center; color: var(--text-muted); font-size: 12px;">${sizeKB} KB</td>
+              <td style="text-align: center; color: var(--text-muted); font-size: 12px;">${escHtml(item.created_at)}</td>
+              <td style="text-align: center;">
+                <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
+                  <a href="api.php?action=backup_download&file=${encodeURIComponent(item.filename)}" class="btn-edit" title="Download" style="width:30px;height:30px;padding:0">⬇️</a>
+                  <button class="btn-check" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)" data-action="restore" data-file="${escHtml(item.filename)}" title="Restore"><span style="color:var(--danger)">🔄</span></button>
+                  <button class="btn-check" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)" data-action="delete_backup" data-file="${escHtml(item.filename)}" title="Hapus"><span style="color:var(--danger)">🗑️</span></button>
+                </div>
+              </td>
+            </tr>`;
+        }).join('');
+
+        // Attach restore button handlers (event delegation)
+        tbody.querySelectorAll('[data-action="restore"]').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const file = this.dataset.file;
+                confirmRestore(file);
+            });
+        });
+
+        // Attach delete backup button handlers
+        tbody.querySelectorAll('[data-action="delete_backup"]').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const file = this.dataset.file;
+                confirmDeleteBackup(file);
+            });
+        });
+
+    } catch (e) {
+        tbody.innerHTML = `<tr class="loading-row"><td colspan="4" style="color:var(--danger)">❌ Gagal: ${e.message}</td></tr>`;
+    }
+}
+
+function confirmRestore(filename) {
+    confirmCallback = async () => {
+        const btn = document.querySelector('[data-file="' + filename + '"]');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>';
+        }
+
+        try {
+            const fd = new FormData();
+            fd.append('action', 'backup_restore');
+            fd.append('file', filename);
+            fd.append('csrf_token', csrfToken());
+
+            const res = await fetch('api.php', { method: 'POST', body: fd });
+            const json = await res.json();
+
+            if (!json.success) throw new Error(json.message);
+
+            showToast('✅ ' + json.message, 'success');
+            closeConfirm();
+
+            if (json.reload) {
+                // Tunggu sebentar lalu reload halaman
+                setTimeout(() => location.reload(), 800);
+            }
+        } catch (e) {
+            showToast('❌ Gagal restore: ' + e.message, 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span style="color:var(--danger)">🔄</span>';
+            }
+        }
+    };
+
+    const msgEl = document.getElementById('confirmMsg');
+    if (msgEl) msgEl.textContent = `Pulihkan database dari backup "${filename}"? Perubahan saat ini akan HILANG permanen.`;
+
+    const overlay = document.getElementById('confirmOverlay');
+    if (overlay) overlay.classList.add('open');
+
+    const okBtn = document.getElementById('confirmOkBtn');
+    if (okBtn) {
+        okBtn.onclick = confirmCallback;
+        setTimeout(() => okBtn.focus(), 100);
+    }
+}
+
+function confirmDeleteBackup(filename) {
+    confirmCallback = async () => {
+        const btn = document.querySelector('[data-action="delete_backup"][data-file="' + filename + '"]');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>';
+        }
+
+        try {
+            const fd = new FormData();
+            fd.append('action', 'backup_delete');
+            fd.append('file', filename);
+            fd.append('csrf_token', csrfToken());
+
+            const res = await fetch('api.php', { method: 'POST', body: fd });
+            const json = await res.json();
+
+            if (!json.success) throw new Error(json.message);
+
+            showToast('✅ ' + json.message, 'success');
+            closeConfirm();
+            loadBackupList();
+        } catch (e) {
+            showToast('❌ Gagal hapus: ' + e.message, 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span style="color:var(--danger)">🗑️</span>';
+            }
+        }
+    };
+
+    const msgEl = document.getElementById('confirmMsg');
+    if (msgEl) msgEl.textContent = `Hapus backup "${filename}"? Tindakan ini tidak bisa dibatalkan.`;
+
+    const overlay = document.getElementById('confirmOverlay');
+    if (overlay) overlay.classList.add('open');
+
+    const okBtn = document.getElementById('confirmOkBtn');
+    if (okBtn) {
+        okBtn.onclick = confirmCallback;
+        setTimeout(() => okBtn.focus(), 100);
+    }
 }
 
 // ── EVENT LISTENERS ───────────────────────
@@ -930,6 +1199,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Aksi tombol tabel & kartu mobile via event delegation
+    const tbody = document.getElementById('tableBody');
+    if (tbody) tbody.addEventListener('click', handleActionClick);
+
+    const mList = document.getElementById('mobileCardList');
+    if (mList) {
+        mList.addEventListener('click', handleActionClick);
+        mList.addEventListener('click', handleCardClick);
+    }
+
+    // Checkbox seleksi (desktop & mobile)
+    document.addEventListener('change', e => {
+        const cb = e.target.closest('.row-cb');
+        if (cb) toggleRow(cb);
+    });
+
     // Global Keyboard Listeners
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
@@ -947,22 +1232,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Inisialisasi Tanggal di Header
-    const headerDate = document.getElementById('header-date');
-    if (headerDate) {
-        const now = new Date();
-        const dateString = now.toLocaleDateString('id-ID', {
-            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-        });
+    // Tanggal header di-render server-side (includes/header.php) agar konsisten di semua halaman
 
-        // Cek jika ada dateText di dalamnya (versi baru) atau langsung di header-date (versi lama)
-        const dateText = document.getElementById('dateText');
-        if (dateText) {
-            dateText.textContent = dateString;
-        } else {
-            headerDate.textContent = dateString;
-        }
-    }
     // Search Input Debounce
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
@@ -980,7 +1251,7 @@ document.addEventListener('DOMContentLoaded', () => {
         drugInput.addEventListener('input', function () {
             clearTimeout(autocompleteTimer);
             const q = this.value.trim();
-            if (q.length < 1) { closeAutocomplete(); return; }
+            if (q.length < 1) { closeAutocomplete(); updateDefectaWarning(null); return; }
             autocompleteTimer = setTimeout(() => fetchAutocomplete(q), 280);
         });
 

@@ -48,6 +48,10 @@ Because everything is one file, a backup is just copying that file out:
    docker compose exec app cp /var/www/html/data/defecta.sqlite ./backup.sqlite
 To restore, copy it back in (stop the container first).
 
+The container also takes an automatic snapshot every day at 02:15 into
+/var/www/html/data/backups/ (keeps the last 14, safe WAL snapshot via
+`VACUUM INTO`).
+
 NOTES
 -----
 - The SQLite file (and config.php) are blocked from web access, both by

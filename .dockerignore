@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.env.example
+*.sql
+*.sql.gz
+backups/
+data/
+_filtertest.txt
+README.md
+docker-compose.yml

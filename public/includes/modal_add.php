@@ -16,6 +16,7 @@
           <input type="text" id="f-obat" class="drug-input-field" placeholder="Ketik nama obat..." autocomplete="off" required>
           <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
         </div>
+        <div id="dupeWarn" class="dupe-warn" style="display:none"></div>
       </div>
 
       <div class="form-group">

@@ -9,3 +9,5 @@ backups/
 # OS / editor noise
 .DS_Store
 Thumbs.db
+.claude/settings.local.json
+*-check-this-codebase.txt

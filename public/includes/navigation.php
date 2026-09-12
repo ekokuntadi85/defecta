@@ -11,6 +11,10 @@
     <i class="stat-ico">📊</i>
     <span>Laporan</span>
   </a>
+  <a class="nav-item" href="#" onclick="openBackupModal(); return false;" title="Backup & Restore Database">
+    <i class="stat-ico">💾</i>
+    <span>Backup</span>
+  </a>
   <div class="nav-item" onclick="doLogout()">
     <i class="stat-ico">🚪</i>
     <span>Keluar</span>

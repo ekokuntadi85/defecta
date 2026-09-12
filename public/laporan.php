@@ -9,6 +9,7 @@ $today = date('Y-m-d');
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Laporan Riwayat – Apotek Mentari Farma Bondowoso</title>
   <meta name="description" content="Laporan riwayat defecta berdasarkan tanggal - Apotek Mentari Farma Bondowoso">
+  <meta name="csrf-token" content="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,6 +53,7 @@ $today = date('Y-m-d');
   </nav>
 
   <?php include 'includes/toasts.php'; ?>
+  <?php include 'includes/modal_backup.php'; ?>
 
 <?php endif; ?>
 
@@ -61,7 +63,11 @@ $today = date('Y-m-d');
   <script>
     async function doLogout() {
       if (!confirm('Logout dari aplikasi?')) return;
-      await fetch('api.php?action=logout');
+      const fd = new FormData();
+      fd.append('action', 'logout');
+      const m = document.querySelector('meta[name="csrf-token"]');
+      fd.append('csrf_token', m ? m.content : '');
+      await fetch('api.php', { method: 'POST', body: fd });
       location.reload();
     }
   </script>

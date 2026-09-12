@@ -9,6 +9,12 @@ services:
       APP_PASSWORD: ${APP_PIN}
     volumes:
       - sqlite_data:/var/www/html/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
