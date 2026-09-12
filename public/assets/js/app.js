@@ -1027,10 +1027,9 @@ async function createBackup() {
     }
 }
 
-async function restoreUpload() {
+function restoreUpload() {
     const input = document.getElementById('backupFileInput');
     const btn  = document.getElementById('btnRestoreUpload');
-    const txt  = document.getElementById('btnRestoreUploadText');
 
     if (!input.files || input.files.length === 0) {
         showToast('❌ Pilih file .sqlite.bz2 terlebih dahulu.', 'error');
@@ -1043,35 +1042,50 @@ async function restoreUpload() {
         return;
     }
 
-    const confirmed = await confirmAction(
-        `Pulihkan database dari file "${file.name}"?` +
-        ' Data saat ini akan diganti dan backup otomatis akan dibuat.'
-    );
-    if (!confirmed) return;
+    // Store file reference for the confirmation callback
+    window._restoreUploadFile = file;
 
-    btn.disabled = true;
-    txt.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Memulihkan...';
+    confirmCallback = async () => {
+        const f = window._restoreUploadFile;
+        const b = document.getElementById('btnRestoreUpload');
+        const t = document.getElementById('btnRestoreUploadText');
 
-    try {
-        const fd = new FormData();
-        fd.append('action', 'backup_restore_upload');
-        fd.append('csrf_token', csrfToken());
-        fd.append('backup_file', file);
+        if (b) { b.disabled = true; t.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Memulihkan...'; }
 
-        const res = await fetch('api.php', { method: 'POST', body: fd });
-        const json = await res.json();
+        try {
+            const fd = new FormData();
+            fd.append('action', 'backup_restore_upload');
+            fd.append('csrf_token', csrfToken());
+            fd.append('backup_file', f);
 
-        if (!json.success) throw new Error(json.message);
+            const res = await fetch('api.php', { method: 'POST', body: fd });
+            const json = await res.json();
 
-        showToast('✅ ' + json.message, 'success');
+            if (!json.success) throw new Error(json.message);
 
-        if (json.reload) {
-            setTimeout(() => location.reload(), 1000);
+            showToast('✅ ' + json.message, 'success');
+            closeConfirm();
+            closeBackupModal();
+
+            if (json.reload) {
+                setTimeout(() => location.reload(), 1000);
+            }
+        } catch (e) {
+            showToast('❌ Gagal restore: ' + e.message, 'error');
+            if (b) { b.disabled = false; t.innerHTML = '🔄 Pulihkan dari File'; }
         }
-    } catch (e) {
-        showToast('❌ Gagal restore: ' + e.message, 'error');
-        btn.disabled = false;
-        txt.innerHTML = '🔄 Pulihkan dari File';
+    };
+
+    const msgEl = document.getElementById('confirmMsg');
+    if (msgEl) msgEl.textContent = `Pulihkan database dari file "${file.name}"? Data saat ini akan diganti dan backup otomatis akan dibuat.`;
+
+    const overlay = document.getElementById('confirmOverlay');
+    if (overlay) overlay.classList.add('open');
+
+    const okBtn = document.getElementById('confirmOkBtn');
+    if (okBtn) {
+        okBtn.onclick = confirmCallback;
+        setTimeout(() => okBtn.focus(), 100);
     }
 }
 
