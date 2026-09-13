@@ -265,14 +265,20 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Tidak ada ID yang dipilih.']);
                 break;
             }
+            $today  = date('Y-m-d');
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
-            $params = [':now' => now(), ':staff' => current_staff()];
+            $params = [':now' => now(), ':staff' => current_staff(), ':today' => $today];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
-            $stmt = $db->prepare("UPDATE defecta SET status='defecta', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
+
+            // Capture old values for audit before update
+            $inClause = implode(',', array_fill(0, count($ids), '?'));
+            $oldRows = $db->query("SELECT id, tanggal, updated_at, updated_by FROM defecta WHERE id IN ($inClause) AND status='tersedia'")->fetchAll(PDO::FETCH_ASSOC);
+
+            $stmt = $db->prepare("UPDATE defecta SET status='defecta', tanggal = :today, updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
             $db->beginTransaction();
             $stmt->execute($params);
             $n = $stmt->rowCount();
-            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'defecta', 'ids' => $ids]);
+            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'defecta', 'tanggal' => $today, 'ids' => $ids, 'old' => $oldRows ?: null]);
             $db->commit();
             echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
             break;

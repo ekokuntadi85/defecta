@@ -69,12 +69,13 @@ final class BulkOperationTest extends TestCase
     private function bulkDefecta(array $ids): array
     {
         $db = $this->getDb();
+        $today = date('Y-m-d');
         $ph = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
-        $params = [':now' => now(), ':staff' => current_staff()];
+        $params = [':now' => now(), ':staff' => current_staff(), ':today' => $today];
         foreach ($ids as $i => $id) { $params[":id$i"] = $id; }
         $db->beginTransaction();
         $stmt = $db->prepare(
-            "UPDATE defecta SET status='defecta', updated_at = :now, updated_by = :staff 
+            "UPDATE defecta SET status='defecta', tanggal = :today, updated_at = :now, updated_by = :staff 
              WHERE id IN ($ph) AND status='tersedia'"
         );
         $stmt->execute($params);
@@ -129,6 +130,22 @@ final class BulkOperationTest extends TestCase
         $row = $db->query("SELECT status, updated_by FROM defecta WHERE id = 3")->fetch(PDO::FETCH_ASSOC);
         $this->assertEquals('defecta', $row['status']);
         $this->assertEquals('sari', $row['updated_by']);
+    }
+
+    public function testBulkDefectaUpdatesTanggalToToday(): void
+    {
+        // Obat C (id=3) was created on 2026-01-03 as 'tersedia'
+        // When moved back to defecta, tanggal should be updated to today
+        $db = $this->getDb();
+        $originalTanggal = $db->query("SELECT tanggal FROM defecta WHERE id = 3")->fetchColumn();
+        $this->assertEquals('2026-01-03', $originalTanggal);
+
+        $result = $this->bulkDefecta([3]);
+        $this->assertEquals(1, $result['affected']);
+
+        $today = date('Y-m-d');
+        $newTanggal = $db->query("SELECT tanggal FROM defecta WHERE id = 3")->fetchColumn();
+        $this->assertEquals($today, $newTanggal, 'tanggal should be updated to today when re-entering defecta');
     }
 
     public function testBulkDeleteRemovesSelectedItems(): void
