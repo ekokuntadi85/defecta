@@ -924,6 +924,7 @@ async function doLogin() {
     const pin = pinInput.value;
     const staff = staffSelect ? staffSelect.value : '';
     const btn = document.getElementById('btnLogin');
+    if (!staff) { alert('Pilih nama staff terlebih dahulu.'); staffSelect?.focus(); return; }
     if (!pin) { alert('Masukkan PIN terlebih dahulu.'); return; }
 
     btn.disabled = true;

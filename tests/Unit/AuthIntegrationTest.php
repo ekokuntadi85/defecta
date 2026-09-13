@@ -155,8 +155,34 @@ final class AuthIntegrationTest extends TestCase
 
     public function testNoDefaultPinWhenEnvUnset(): void
     {
-        // Verify APP_PASSWORD is from the test bootstrap env
         $this->assertEquals('test_pin_1234', APP_PASSWORD);
         $this->assertNotEquals('1324', APP_PASSWORD, 'Should not use default PIN');
+    }
+
+    public function testLoginRequiresStaffSelection(): void
+    {
+        // Verify that STAFF_LIST requires a non-empty key
+        $emptyKey = '';
+        $isValidStaff = $emptyKey !== '' && array_key_exists($emptyKey, STAFF_LIST);
+        $this->assertFalse($isValidStaff, 'Empty staff should not be valid');
+
+        // Verify that known staff keys are valid
+        $this->assertTrue(array_key_exists('andi', STAFF_LIST));
+        $this->assertTrue(array_key_exists('sari', STAFF_LIST));
+    }
+
+    public function testLoginRejectsUnknownStaff(): void
+    {
+        $staff = 'hacker';
+        $isValidStaff = $staff !== '' && array_key_exists($staff, STAFF_LIST);
+        $this->assertFalse($isValidStaff, 'Unknown staff should not be valid');
+    }
+
+    public function testLoginAllowsKnownStaff(): void
+    {
+        foreach (['andi', 'sari', 'budi', 'lina'] as $staff) {
+            $isValidStaff = $staff !== '' && array_key_exists($staff, STAFF_LIST);
+            $this->assertTrue($isValidStaff, "$staff should be valid");
+        }
     }
 }

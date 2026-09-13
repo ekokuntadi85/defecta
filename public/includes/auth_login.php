@@ -4,9 +4,9 @@
     <h2 class="login-title">Akses Staf</h2>
     <p class="login-sub">Masukkan PIN untuk mengelola stok</p>
     <form onsubmit="event.preventDefault(); doLogin();">
-      <select id="staffSelect" name="staff_name" class="form-select" style="margin-bottom: 12px;">
+      <select id="staffSelect" name="staff_name" class="form-select" style="margin-bottom: 12px;" required>
         <?php foreach (STAFF_LIST as $val => $label): ?>
-          <option value="<?= htmlspecialchars($val) ?>"><?= htmlspecialchars($label) ?></option>
+          <option value="<?= htmlspecialchars($val) ?>" <?= $val === '' ? 'disabled selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>
       </select>
       <input type="password" id="pinInput" class="pin-input" placeholder="••••" maxlength="8" autofocus>

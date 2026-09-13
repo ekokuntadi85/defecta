@@ -20,6 +20,7 @@ $_tanggalHeader = $_hari . ', ' . date('j') . ' ' . $_bulan . ' ' . date('Y');
   <div class="header-right">
     <a href="index.php" class="header-nav-link <?= $_aClass('beranda') ?>">🏠 Beranda</a>
     <a href="laporan.php" class="header-nav-link <?= $_aClass('laporan') ?>">📊 Laporan</a>
+    <a href="staff.php" class="header-nav-link <?= $_aClass('staff') ?>">👥 Staff</a>
     <a href="#" class="header-nav-link" onclick="openBackupModal(); return false;" title="Backup & Restore Database">💾 Backup</a>
     <div class="badge-date" id="header-date" style="background: var(--surface2); padding: 4px 10px; border-radius: 6px;">
       <span>👤</span>

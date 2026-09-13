@@ -35,27 +35,8 @@ if ($action === 'login') {
     }
 
     $password = $_POST['password'] ?? '';
-    if (is_string($password) && APP_PASSWORD !== '' && hash_equals(APP_PASSWORD, $password)) {
-        session_regenerate_id(true); // cegah session fixation
-        $_SESSION['logged_in'] = true;
-        $_SESSION['login_at']  = time();
-        // Simpan nama staff bila dikirimkan (untuk audit trail)
-        $staff = trim($_POST['staff_name'] ?? '');
-        if ($staff !== '' && array_key_exists($staff, STAFF_LIST)) {
-            set_staff($staff);
-        } else {
-            set_staff('unknown');
-        }
-        initDB();
-        $db = getDB();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-        audit_log('LOGIN', null, null, 1, ['ip' => $ip]);
-        echo json_encode([
-            'success'    => true,
-            'message'    => 'Login berhasil.',
-            'staff_name' => current_staff(),
-        ]);
-    } else {
+    $staff = trim($_POST['staff_name'] ?? '');
+    if (!is_string($password) || $password === '' || APP_PASSWORD === '' || !hash_equals(APP_PASSWORD, $password)) {
         $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
         $ins->execute([':ip' => $ip]);
         http_response_code(401);
@@ -66,6 +47,29 @@ if ($action === 'login') {
         }
         exit;
     }
+
+    // Require staff selection — cannot login as 'unknown'
+    if ($staff === '' || !array_key_exists($staff, STAFF_LIST)) {
+        $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
+        $ins->execute([':ip' => $ip]);
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Pilih nama staff terlebih dahulu.']);
+        exit;
+    }
+
+    session_regenerate_id(true); // cegah session fixation
+    $_SESSION['logged_in'] = true;
+    $_SESSION['login_at']  = time();
+    set_staff($staff);
+    initDB();
+    $db = getDB();
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'staff' => $staff]);
+    echo json_encode([
+        'success'    => true,
+        'message'    => 'Login berhasil.',
+        'staff_name' => current_staff(),
+    ]);
     exit;
 }
 
