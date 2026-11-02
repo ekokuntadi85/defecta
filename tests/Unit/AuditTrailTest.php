@@ -29,10 +29,10 @@ final class AuditTrailTest extends TestCase
     public function testStaffListHasExpectedEntries(): void
     {
         $this->assertNotEmpty(STAFF_LIST);
-        $this->assertArrayHasKey('andi', STAFF_LIST);
-        $this->assertArrayHasKey('sari', STAFF_LIST);
-        $this->assertArrayHasKey('budi', STAFF_LIST);
-        $this->assertArrayHasKey('lina', STAFF_LIST);
+        $this->assertArrayHasKey('damayanti', STAFF_LIST);
+        $this->assertArrayHasKey('faizin', STAFF_LIST);
+        $this->assertArrayHasKey('aisyiyah', STAFF_LIST);
+        $this->assertArrayHasKey('anggun', STAFF_LIST);
         // First entry should be empty (placeholder)
         $this->assertArrayHasKey('', STAFF_LIST);
     }

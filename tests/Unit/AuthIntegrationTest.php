@@ -69,21 +69,20 @@ final class AuthIntegrationTest extends TestCase
 
     public function testStaffListOnlyAllowsKnownStaff(): void
     {
-        $this->assertArrayHasKey('sari', STAFF_LIST);
-        $this->assertArrayHasKey('andi', STAFF_LIST);
-        $this->assertArrayHasKey('budi', STAFF_LIST);
-        $this->assertArrayHasKey('lina', STAFF_LIST);
-
+        $this->assertArrayHasKey('damayanti', STAFF_LIST);
+        $this->assertArrayHasKey('faizin', STAFF_LIST);
+        $this->assertArrayHasKey('aisyiyah', STAFF_LIST);
+        $this->assertArrayHasKey('anggun', STAFF_LIST);
         $this->assertArrayNotHasKey('hacker', STAFF_LIST);
         $this->assertArrayNotHasKey('admin', STAFF_LIST);
     }
 
     public function testStaffIdentityIsStableIdentifier(): void
     {
-        $this->assertEquals('Andi (Apoteker)', STAFF_LIST['andi']);
-        $this->assertEquals('Sari (Staf)', STAFF_LIST['sari']);
-        $this->assertEquals('Budi (Staf)', STAFF_LIST['budi']);
-        $this->assertEquals('Lina (Staf)', STAFF_LIST['lina']);
+        $this->assertEquals('Damayanti (Apoteker)', STAFF_LIST['damayanti']);
+        $this->assertEquals('Faizin (Manajer)', STAFF_LIST['faizin']);
+        $this->assertEquals('Aisyiyah (Staf)', STAFF_LIST['aisyiyah']);
+        $this->assertEquals('Anggun (Staf)', STAFF_LIST['anggun']);
 
         foreach (STAFF_LIST as $key => $label) {
             if ($key !== '') {
@@ -133,10 +132,10 @@ final class AuthIntegrationTest extends TestCase
         $_SESSION = [];
         $_SESSION['logged_in'] = true;
         $_SESSION['login_at'] = time();
-        set_staff('andi');
+        set_staff('damayanti');
 
         $this->assertTrue($_SESSION['logged_in']);
-        $this->assertEquals('andi', $_SESSION['staff_name']);
+        $this->assertEquals('damayanti', $_SESSION['username'] ?? current_staff());
     }
 
     public function testSessionClearsOnLogout(): void
@@ -161,14 +160,13 @@ final class AuthIntegrationTest extends TestCase
 
     public function testLoginRequiresStaffSelection(): void
     {
-        // Verify that STAFF_LIST requires a non-empty key
         $emptyKey = '';
         $isValidStaff = $emptyKey !== '' && array_key_exists($emptyKey, STAFF_LIST);
         $this->assertFalse($isValidStaff, 'Empty staff should not be valid');
 
-        // Verify that known staff keys are valid
-        $this->assertTrue(array_key_exists('andi', STAFF_LIST));
-        $this->assertTrue(array_key_exists('sari', STAFF_LIST));
+        $validStaff = 'damayanti';
+        $isValidStaff = $validStaff !== '' && array_key_exists($validStaff, STAFF_LIST);
+        $this->assertTrue($isValidStaff, 'damayanti should be valid');
     }
 
     public function testLoginRejectsUnknownStaff(): void
@@ -180,9 +178,72 @@ final class AuthIntegrationTest extends TestCase
 
     public function testLoginAllowsKnownStaff(): void
     {
-        foreach (['andi', 'sari', 'budi', 'lina'] as $staff) {
+        foreach (['damayanti', 'faizin', 'aisyiyah', 'anggun'] as $staff) {
             $isValidStaff = $staff !== '' && array_key_exists($staff, STAFF_LIST);
             $this->assertTrue($isValidStaff, "$staff should be valid");
         }
+    }
+
+    public function testUsersTableSeedsDefaultUsers(): void
+    {
+        $db = $this->getDb();
+        $users = $db->query("SELECT username, role, is_active FROM users ORDER BY username")->fetchAll(PDO::FETCH_ASSOC);
+
+        $usernames = array_column($users, 'username');
+        $this->assertContains('damayanti', $usernames);
+        $this->assertContains('faizin', $usernames);
+        $this->assertContains('aisyiyah', $usernames);
+        $this->assertContains('anggun', $usernames);
+
+        $roles = [];
+        foreach ($users as $u) { $roles[$u['username']] = $u['role']; }
+        $this->assertEquals('apoteker', $roles['damayanti']);
+        $this->assertEquals('manager', $roles['faizin']);
+        $this->assertEquals('staff', $roles['aisyiyah']);
+        $this->assertEquals('staff', $roles['anggun']);
+    }
+
+    public function testPasswordHashStoredSecurely(): void
+    {
+        $db = $this->getDb();
+        $row = $db->query("SELECT pin_hash FROM users WHERE username = 'damayanti'")->fetch(PDO::FETCH_ASSOC);
+        $this->assertNotEmpty($row['pin_hash'], 'pin_hash should not be empty');
+        $this->assertTrue(str_starts_with($row['pin_hash'], '$'), 'PIN should be hashed (password_hash uses $ prefix)');
+        $this->assertNotEquals(DEFAULT_USER_PIN, $row['pin_hash'], 'PIN hash should not equal plaintext');
+    }
+
+    public function testAuthenticateUserSuccess(): void
+    {
+        $user = authenticate_user('damayanti', DEFAULT_USER_PIN);
+        $this->assertNotNull($user, 'Should authenticate with default PIN');
+        $this->assertEquals('damayanti', $user['username']);
+        $this->assertEquals('apoteker', $user['role']);
+    }
+
+    public function testAuthenticateUserWrongPin(): void
+    {
+        $user = authenticate_user('damayanti', 'wrong_pin');
+        $this->assertNull($user, 'Should not authenticate with wrong PIN');
+    }
+
+    public function testAuthenticateUserInvalidUsername(): void
+    {
+        $user = authenticate_user('nonexistent', DEFAULT_USER_PIN);
+        $this->assertNull($user, 'Should not authenticate with invalid username');
+    }
+
+    public function testIsAdminReturnsTrueForAdminRoles(): void
+    {
+        $_SESSION = ['role' => 'apoteker'];
+        $this->assertTrue(is_admin(), 'apoteker should be admin');
+
+        $_SESSION = ['role' => 'manager'];
+        $this->assertTrue(is_admin(), 'manager should be admin');
+    }
+
+    public function testIsAdminReturnsFalseForStaff(): void
+    {
+        $_SESSION = ['role' => 'staff'];
+        $this->assertFalse(is_admin(), 'staff should not be admin');
     }
 }

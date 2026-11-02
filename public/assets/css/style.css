@@ -1180,7 +1180,7 @@ tr.row-selected td {
     background: var(--accent-soft) !important;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
     .header {
         padding: 14px 16px;
     }
@@ -1275,7 +1275,7 @@ tr.row-selected td {
     }
 
     .bulk-bar.show {
-        bottom: 85px;
+        bottom: 95px;
     }
 
     .bulk-bar .btn-bulk-ok {
@@ -1825,7 +1825,7 @@ input[type="file"]::before {
 }
 
 /* ── LAPORAN MOBILE RESPONSIVE ── */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
     .header-nav-link {
         display: none;
     }

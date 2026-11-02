@@ -51,6 +51,10 @@ extract($templateVars, EXTR_SKIP);
       <i class="stat-ico">📊</i>
       <span>Laporan</span>
     </a>
+    <a class="nav-item" href="staff.php">
+      <i class="stat-ico">👥</i>
+      <span>Staff</span>
+    </a>
     <div class="nav-item" onclick="doLogout()">
       <i class="stat-ico">🚪</i>
       <span>Keluar</span>

@@ -24,3 +24,7 @@ $_SESSION = [];
 
 // Include the config file under test
 require_once __DIR__ . '/../public/config.php';
+
+// Pre-initialize the test database with tables (including users)
+initDB();
+

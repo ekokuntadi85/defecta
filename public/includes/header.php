@@ -25,6 +25,11 @@ $_tanggalHeader = $_hari . ', ' . date('j') . ' ' . $_bulan . ' ' . date('Y');
     <div class="badge-date" id="header-date" style="background: var(--surface2); padding: 4px 10px; border-radius: 6px;">
       <span>👤</span>
       <span id="staffName"><?= htmlspecialchars(ucfirst(current_staff())) ?></span>
+      <?php if (isset($_SESSION['display_name'])): ?>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">
+          (<?= htmlspecialchars(ucfirst($_SESSION['role'] ?? 'staff')) ?>)
+        </span>
+      <?php endif; ?>
     </div>
     <div class="badge-date">
       <span>📅</span>

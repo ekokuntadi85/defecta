@@ -20,9 +20,9 @@ final class ConfigTest extends TestCase
     public function testStaffListIsDefined(): void
     {
         $this->assertIsArray(STAFF_LIST);
-        $this->assertArrayHasKey('andi', STAFF_LIST);
-        $this->assertArrayHasKey('sari', STAFF_LIST);
-        $this->assertEquals('Andi (Apoteker)', STAFF_LIST['andi']);
+        $this->assertArrayHasKey('damayanti', STAFF_LIST);
+        $this->assertArrayHasKey('faizin', STAFF_LIST);
+        $this->assertEquals('Damayanti (Apoteker)', STAFF_LIST['damayanti']);
     }
 
     public function testIsNotLoggedInByDefault(): void

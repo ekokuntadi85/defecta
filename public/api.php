@@ -19,13 +19,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// State-changing actions must use POST only
+$readOnlyActions = ['list', 'search_obat', 'export', 'staff_list', 'laporan_range'];
+$isStateChanging = !in_array($action, $readOnlyActions);
+if ($isStateChanging && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Method not allowed']);
+    exit;
+}
+
 // ── AUTH CHECK ──────────────────────────────────────────────
 if ($action === 'login') {
-    // Rate limit: maksimal 5 percobaan per 15 menit per IP
-    $db = getDB();
     initDB();
-    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
+    $db = getDB();
+
+    // Rate limit: max 5 attempts per 15 min per IP
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
     $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-15 minutes')");
     $recent->execute([':ip' => $ip]);
     if ((int)$recent->fetchColumn() >= 5) {
@@ -34,41 +44,60 @@ if ($action === 'login') {
         exit;
     }
 
-    $password = $_POST['password'] ?? '';
-    $staff = trim($_POST['staff_name'] ?? '');
-    if (!is_string($password) || $password === '' || APP_PASSWORD === '' || !hash_equals(APP_PASSWORD, $password)) {
-        $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
-        $ins->execute([':ip' => $ip]);
-        http_response_code(401);
-        if (APP_PASSWORD === '') {
-            echo json_encode(['success' => false, 'message' => 'APP_PASSWORD belum dikonfigurasi. Hubungi administrator.']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'PIN salah!']);
-        }
+    $username = trim($_POST['username'] ?? '');
+    $pin      = $_POST['pin'] ?? '';
+
+    // Require username
+    if ($username === '') {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Pilih nama user terlebih dahulu.']);
         exit;
     }
 
-    // Require staff selection — cannot login as 'unknown'
-    if ($staff === '' || !array_key_exists($staff, STAFF_LIST)) {
-        $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
-        $ins->execute([':ip' => $ip]);
-        http_response_code(403);
-        echo json_encode(['success' => false, 'message' => 'Pilih nama staff terlebih dahulu.']);
+    // Authenticate via individual user PIN (preferred)
+    $user = authenticate_user($username, $pin);
+    if ($user === null) {
+        // Try shared PIN fallback if APP_PASSWORD is set (legacy support)
+        if (APP_PASSWORD !== '' && is_string($pin) && hash_equals(APP_PASSWORD, $pin) && array_key_exists($username, STAFF_LIST)) {
+            session_regenerate_id(true);
+            $_SESSION['logged_in']    = true;
+            $_SESSION['login_at']     = time();
+            $_SESSION['last_activity'] = time();
+            $_SESSION['user_id']      = null;
+            $_SESSION['username']     = $username;
+            $_SESSION['display_name'] = STAFF_LIST[$username] ?? $username;
+            $_SESSION['role']         = 'staff';
+            audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'username' => $username, 'method' => 'shared_pin']);
+            echo json_encode([
+                'success'      => true,
+                'message'      => 'Login berhasil.',
+                'staff_name'   => $username,
+                'display_name' => STAFF_LIST[$username] ?? $username,
+                'role'         => 'staff',
+            ]);
+            exit;
+        }
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Username atau PIN salah!']);
         exit;
     }
 
     session_regenerate_id(true); // cegah session fixation
-    $_SESSION['logged_in'] = true;
-    $_SESSION['login_at']  = time();
-    set_staff($staff);
-    initDB();
-    $db = getDB();
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'staff' => $staff]);
+    $_SESSION['logged_in']   = true;
+    $_SESSION['login_at']    = time();
+    $_SESSION['last_activity'] = time();
+    $_SESSION['user_id']     = $user['id'];
+    $_SESSION['username']    = $user['username'];
+    $_SESSION['display_name'] = $user['display_name'];
+    $_SESSION['role']        = $user['role'];
+
+    audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'username' => $user['username'], 'role' => $user['role']]);
     echo json_encode([
-        'success'    => true,
-        'message'    => 'Login berhasil.',
-        'staff_name' => current_staff(),
+        'success'        => true,
+        'message'        => 'Login berhasil.',
+        'staff_name'     => $user['username'],
+        'display_name'   => $user['display_name'],
+        'role'           => $user['role'],
     ]);
     exit;
 }
@@ -168,7 +197,9 @@ try {
             ");
             $stmt->execute($params);
             $rows = $stmt->fetchAll();
-            $total = (int)$db->query("SELECT COUNT(*) FROM defecta WHERE status='$mode'")->fetchColumn();
+            $countStmt = $db->prepare("SELECT COUNT(*) FROM defecta WHERE status = :mode");
+            $countStmt->execute([':mode' => $mode]);
+            $total = (int)$countStmt->fetchColumn();
             echo json_encode(['success' => true, 'data' => $rows, 'total' => count($rows), 'mode' => $mode]);
             break;
 
@@ -789,8 +820,15 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Format file tidak didukung. Hanya file .sqlite.bz2 yang diizinkan.']);
                 break;
             }
-            // Validasi ukuran (max 50 MB)
-            $maxSize = 50 * 1024 * 1024;
+            // Validasi magic bytes untuk file bzip2 (BZh = 0x42 0x5A 0x68)
+            $fhandle = fopen($f['tmp_name'], 'rb');
+            $magicBytes = fread($fhandle, 3);
+            fclose($fhandle);
+            if ($magicBytes !== "BZh") {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Magic bytes file tidak valid untuk bzip2.']);
+                break;
+            }
             if ($f['size'] > $maxSize) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'File terlalu besar. Maksimal 50 MB.']);
@@ -878,6 +916,199 @@ try {
                 'reload'     => true,
                 'total_rows' => $totalRows,
             ]);
+            break;
+
+        // ── STAFF: LIST ─────────────────────────────────────
+        case 'staff_list':
+            $stmt = $db->query("SELECT id, username, display_name, role, is_active FROM users ORDER BY display_name");
+            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['success' => true, 'data' => $users]);
+            break;
+
+        // ── STAFF: CREATE (admin only) ──────────────────────
+        case 'staff_create':
+            if (!is_admin()) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Hanya admin yang dapat menambah staff.']);
+                break;
+            }
+            $username    = trim($_POST['username'] ?? '');
+            $displayName = trim($_POST['display_name'] ?? '');
+            $role        = trim($_POST['role'] ?? '');
+            $pin         = $_POST['pin'] ?? '';
+
+            if (!$username || !$displayName || !$pin) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Semua field wajib diisi.']);
+                break;
+            }
+            if (!in_array($role, ['apoteker', 'manager', 'staff'])) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Peran tidak valid.']);
+                break;
+            }
+            if (strlen($pin) < 6) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'PIN minimal 6 karakter.']);
+                break;
+            }
+
+            // Check username uniqueness
+            $check = $db->prepare("SELECT id FROM users WHERE username = :u LIMIT 1");
+            $check->execute([':u' => $username]);
+            if ($check->fetch()) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => "Username '$username' sudah digunakan."]);
+                break;
+            }
+
+            $db->beginTransaction();
+            $stmt = $db->prepare("INSERT INTO users (username, display_name, role, pin_hash) VALUES (:u, :dn, :r, :ph)");
+            $stmt->execute([
+                ':u'  => $username,
+                ':dn' => $displayName,
+                ':r'  => $role,
+                ':ph' => password_hash($pin, PASSWORD_DEFAULT),
+            ]);
+            $newId = (int)$db->lastInsertId();
+            audit_log('USER_CREATE', 'users', $newId, 1, ['username' => $username, 'role' => $role]);
+            $db->commit();
+
+            echo json_encode(['success' => true, 'message' => "Staff '$displayName' berhasil ditambahkan.", 'id' => $newId]);
+            break;
+
+        // ── STAFF: UPDATE (admin: any user; staff: self only) ─
+        case 'staff_update':
+            $id = (int)($_POST['id'] ?? 0);
+            if ($id <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'ID tidak valid.']);
+                break;
+            }
+
+            // Check authorization
+            $selfUpdate = $id === current_user_id();
+            if (!is_admin() && !$selfUpdate) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Anda tidak memiliki izin untuk mengubah staff lain.']);
+                break;
+            }
+
+            $displayName = trim($_POST['display_name'] ?? '');
+            $role = trim($_POST['role'] ?? '');
+            $isActive = isset($_POST['is_active']) ? (int)$_POST['is_active'] : null;
+            $newPin = $_POST['new_pin'] ?? '';
+            $oldPin = $_POST['old_pin'] ?? '';
+
+            // Capture old values
+            $oldRow = $db->prepare("SELECT id, username, display_name, role, is_active FROM users WHERE id = :id");
+            $oldRow->execute([':id' => $id]);
+            $oldUser = $oldRow->fetch();
+            if (!$oldUser) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'message' => 'Staff tidak ditemukan.']);
+                break;
+            }
+
+            // Non-admin can only change display_name + PIN (not role/is_active)
+            if (!$selfUpdate) {
+                $fields = [];
+                if ($displayName !== '') {
+                    $fields['display_name'] = $displayName;
+                }
+                if ($role !== '' && in_array($role, ['apoteker', 'manager', 'staff'])) {
+                    $fields['role'] = $role;
+                }
+                if ($isActive !== null) {
+                    $fields['is_active'] = $isActive;
+                }
+            } else {
+                // Staff updating own profile — only display_name + PIN
+                $fields = [];
+                if ($displayName !== '') {
+                    $fields['display_name'] = $displayName;
+                }
+                // PIN change requires old PIN verification
+                if ($newPin !== '') {
+                    if (strlen($newPin) < 6) {
+                        http_response_code(400);
+                        echo json_encode(['success' => false, 'message' => 'PIN baru minimal 6 karakter.']);
+                        break;
+                    }
+                    if ($oldUser['pin_hash'] !== null && !password_verify($oldPin, $oldUser['pin_hash'])) {
+                        http_response_code(403);
+                        echo json_encode(['success' => false, 'message' => 'PIN lama salah.']);
+                        break;
+                    }
+                    $fields['pin_hash'] = password_hash($newPin, PASSWORD_DEFAULT);
+                }
+            }
+
+            if (empty($fields)) {
+                echo json_encode(['success' => true, 'message' => 'Tidak ada perubahan.']);
+                break;
+            }
+
+            $setParts = [];
+            $params = [':id' => $id];
+            foreach ($fields as $col => $val) {
+                $setParts[] = "$col = :$col";
+                $params[":$col"] = $val;
+            }
+            $setParts[] = "updated_at = :now";
+            $params[':now'] = now();
+
+            $db->beginTransaction();
+            $stmt = $db->prepare("UPDATE users SET " . implode(', ', $setParts) . " WHERE id = :id");
+            $stmt->execute($params);
+
+            if ($newPin !== '' && $selfUpdate) {
+                audit_log('PIN_CHANGE', 'users', $id, 1, ['username' => $oldUser['username']]);
+            } else {
+                audit_log('USER_UPDATE', 'users', $id, 1, ['old' => $oldUser, 'new' => $fields]);
+            }
+            $db->commit();
+
+            echo json_encode(['success' => true, 'message' => 'Staff berhasil diperbarui.']);
+            break;
+
+        // ── STAFF: DELETE (admin only, soft delete) ─────────
+        case 'staff_delete':
+            if (!is_admin()) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Hanya admin yang dapat menghapus staff.']);
+                break;
+            }
+            $id = (int)($_POST['id'] ?? 0);
+            if ($id <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'ID tidak valid.']);
+                break;
+            }
+
+            // Prevent self-deletion
+            if ($id === current_user_id()) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Anda tidak dapat menghapus akun sendiri.']);
+                break;
+            }
+
+            $oldRow = $db->prepare("SELECT id, username, display_name FROM users WHERE id = :id");
+            $oldRow->execute([':id' => $id]);
+            $user = $oldRow->fetch();
+            if (!$user) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'message' => 'Staff tidak ditemukan.']);
+                break;
+            }
+
+            $db->beginTransaction();
+            $stmt = $db->prepare("UPDATE users SET is_active = 0 WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+            audit_log('USER_DELETE', 'users', $id, 1, ['username' => $user['username']]);
+            $db->commit();
+
+            echo json_encode(['success' => true, 'message' => "Staff '{$user['display_name']}' dinonaktifkan."]);
             break;
 
         default:

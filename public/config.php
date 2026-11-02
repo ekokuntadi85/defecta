@@ -13,42 +13,36 @@ if (php_sapi_name() !== 'cli' && realpath(__FILE__) === realpath($_SERVER['SCRIP
 // Waktu lokal (sebelumnya MySQL memakai +07:00)
 date_default_timezone_set('Asia/Jakarta');
 
-// Password Aplikasi (Simple PIN/Pass untuk seluruh Staf)
-// Production MUST set APP_PASSWORD in the environment.
+// ── BACKWARD COMPATIBILITY ─────────────────────────────────────────
+// APP_PASSWORD kept as optional fallback for environments that still use
+// a shared PIN. Individual user PINs (users table) take priority.
 $envPin = getenv('APP_PASSWORD');
 if ($envPin === false || $envPin === '') {
-    // Development convenience: .env file can supply APP_PIN (mapped to APP_PASSWORD
-    // in docker-compose.yml).  In production, always set APP_PASSWORD directly.
     $envPin = getenv('APP_PIN') ?: '';
 }
-if ($envPin === '') {
-    // No default — fail loudly rather than silently accepting a known PIN.
-    if (php_sapi_name() === 'cli') {
-        define('APP_PASSWORD', '');
-    } else {
-        define('APP_PASSWORD', '');
-        error_log('[defecta] WARNING: APP_PASSWORD not set in environment. Login will be disabled.');
-    }
-} else {
-    define('APP_PASSWORD', $envPin);
-}
+define('APP_PASSWORD', $envPin !== '' ? $envPin : '');
 
-// ── USER IDENTITY ─────────────────────────────────────────────
-// Daftar staff yang dapat login (nama => label tampilan)
-// Untuk keperluan audit trail: mencatat siapa yang melakukan perubahan.
+// Default PIN for seeded users (change after first login)
+define('DEFAULT_USER_PIN', '123456');
+
+// ── STAFF LIST (backward compat — seeded from users table at runtime) ─
 define('STAFF_LIST', [
     ''           => 'Pilih nama...',
-    'andi'       => 'Andi (Apoteker)',
-    'sari'       => 'Sari (Staf)',
-    'budi'       => 'Budi (Staf)',
-    'lina'       => 'Lina (Staf)',
+    'damayanti'  => 'Damayanti (Apoteker)',
+    'faizin'     => 'Faizin (Manajer)',
+    'aisyiyah'   => 'Aisyiyah (Staf)',
+    'anggun'     => 'Anggun (Staf)',
 ]);
+
+// ── USER ROLES ──────────────────────────────────────────────────────
+define('ROLE_Apoteker', 'apoteker');
+define('ROLE_Manager', 'manager');
+define('ROLE_Staff', 'staff');
 
 /**
  * Memulai session untuk autentikasi
  */
 if (session_status() === PHP_SESSION_NONE) {
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $_SERVER['SCRIPT_NAME'] ?? '';
     session_start([
         'cookie_lifetime' => 86400 * 30, // 30 Hari agar tidak sering login ulang
         'cookie_httponly' => true,
@@ -73,21 +67,138 @@ function csrf_token(): string {
  * Cek apakah user sudah login
  */
 function is_logged_in(): bool {
-    return isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true;
+    if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+        return false;
+    }
+    
+    // Session idle timeout: 30 minutes
+    $idleTimeout = 1800; // 30 minutes in seconds
+    if (isset($_SESSION['last_activity'])) {
+        if (time() - $_SESSION['last_activity'] > $idleTimeout) {
+            session_destroy();
+            return false;
+        }
+    }
+    $_SESSION['last_activity'] = time();
+    
+    return true;
 }
 
 /**
  * Dapatkan nama staff yang sedang login (untuk audit trail)
+ * Backward-compatible wrapper around current_user()
  */
 function current_staff(): string {
-    return $_SESSION['staff_name'] ?? 'unknown';
+    return $_SESSION['username'] ?? 'unknown';
 }
 
 /**
- * Set staff yang sedang login
+ * Set staff yang sedang login (backward compat)
  */
 function set_staff(string $name): void {
-    $_SESSION['staff_name'] = $name;
+    $_SESSION['username'] = $name;
+}
+
+/**
+ * Dapatkan user ID yang sedang login
+ */
+function current_user_id(): ?int {
+    return $_SESSION['user_id'] ?? null;
+}
+
+/**
+ * Dapatkan nama username yang sedang login
+ */
+function current_username(): string {
+    return $_SESSION['username'] ?? 'unknown';
+}
+
+/**
+ * Dapatkan nama tampilan user yang sedang login
+ */
+function current_user_display(): string {
+    return $_SESSION['display_name'] ?? 'Unknown';
+}
+
+/**
+ * Dapatkan peran user yang sedang login
+ */
+function current_user_role(): string {
+    return $_SESSION['role'] ?? 'staff';
+}
+
+/**
+ * Cek apakah user adalah admin (apoteker atau manajer)
+ */
+function is_admin(): bool {
+    return in_array(current_user_role(), ['apoteker', 'manager'], true);
+}
+
+/**
+ * Authenticate user by username + PIN
+ * Returns user array on success, false on failure
+ */
+function authenticate_user(string $username, string $pin): ?array {
+    $db = getDB();
+
+    // Rate limit: max 5 per 15 minutes per username
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+
+    // Clean old attempts (>1 hour)
+    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
+
+    $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-15 minutes')");
+    $recent->execute([':ip' => $ip]);
+    if ((int)$recent->fetchColumn() >= 5) {
+        return null; // rate limited
+    }
+
+    // Check username exists and is active
+    $stmt = $db->prepare("SELECT id, username, display_name, role, pin_hash, is_active FROM users WHERE username = :u LIMIT 1");
+    $stmt->execute([':u' => $username]);
+    $user = $stmt->fetch();
+
+    if (!$user || !$user['is_active'] || !password_verify($pin, $user['pin_hash'])) {
+        // Record failed attempt
+        $ins = $db->prepare("INSERT INTO login_attempts (ip) VALUES (:ip)");
+        $ins->execute([':ip' => $ip]);
+        return null;
+    }
+
+    // Clear failed attempts for this IP on success
+    $db->exec("DELETE FROM login_attempts WHERE ip = '$ip'");
+
+    return $user;
+}
+
+/**
+ * Authenticate by PIN (shared fallback) — only used when APP_PASSWORD is set
+ * and no username is provided (legacy login support)
+ */
+function authenticate_shared_pin(string $pin): bool {
+    if (APP_PASSWORD === '') return false;
+    return hash_equals(APP_PASSWORD, $pin);
+}
+
+/**
+ * Seed default users if users table is empty
+ */
+function seed_default_users(): void {
+    $db = getDB();
+    $defaultPin = DEFAULT_USER_PIN;
+    $pinHash = password_hash($defaultPin, PASSWORD_DEFAULT);
+
+    $users = [
+        ['damayanti', 'Damayanti (Apoteker)', 'apoteker'],
+        ['faizin',    'Faizin (Manajer)',     'manager'],
+        ['aisyiyah',  'Aisyiyah (Staf)',      'staff'],
+        ['anggun',    'Anggun (Staf)',        'staff'],
+    ];
+
+    $stmt = $db->prepare("INSERT OR IGNORE INTO users (username, display_name, role, pin_hash, is_active) VALUES (:u, :dn, :r, :ph, 1)");
+    foreach ($users as [$u, $dn, $r]) {
+        $stmt->execute([':u' => $u, ':dn' => $dn, ':r' => $r, ':ph' => $pinHash]);
+    }
 }
 
 /**
@@ -154,8 +265,6 @@ function initDB(): void {
         $db->exec("CREATE INDEX IF NOT EXISTS idx_nama    ON defecta(nama_obat)");
     } else {
         // ── MIGRASI: tambah kolom audit trail jika belum ada ──
-        // PRAGMA table_info mengembalikan kolom: cid, name, type, notnull, dflt_value, pk
-        // Harus pakai FETCH_NUM dan ambil indeks ke-1 (name) atau FETCH_ASSOC
         $pragmaRows = $db->query("PRAGMA table_info(defecta)")->fetchAll(PDO::FETCH_ASSOC);
         $colNames = array_column($pragmaRows, 'name');
         if (!in_array('created_by', $colNames)) {
@@ -177,11 +286,32 @@ function initDB(): void {
         $db->exec("CREATE INDEX IF NOT EXISTS idx_login_ip ON login_attempts(ip, attempted_at)");
     }
 
+    // ── USERS TABLE (individual PIN authentication) ──
+    if (!in_array('users', $tables, true)) {
+        $db->exec("
+            CREATE TABLE users (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                username     TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                role         TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('apoteker','manager','staff')),
+                pin_hash     TEXT NOT NULL,
+                is_active    INTEGER DEFAULT 1,
+                created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at   TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_users_role    ON users(role)");
+
+        // Seed default users
+        seed_default_users();
+    }
+
     if (!in_array('audit_log', $tables, true)) {
         $db->exec("
             CREATE TABLE audit_log (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      TEXT NOT NULL,
+                user_id      TEXT NOT NULL DEFAULT 'unknown',
                 action       TEXT NOT NULL,
                 entity_type  TEXT,
                 entity_id    INTEGER,
@@ -253,6 +383,7 @@ function validate_database_backup(string $path): true {
 
     $integrity = $pdo->query('PRAGMA integrity_check')->fetchColumn();
     if ($integrity !== 'ok') {
+        $pdo = null;
         throw new RuntimeException('Integrity check failed: ' . $integrity);
     }
 
@@ -284,4 +415,25 @@ function validate_database_backup(string $path): true {
     unset($check);
 
     return true;
+}
+
+/**
+ * Get all active staff list (username => display_name) for login dropdown.
+ * Falls back to STAFF_LIST constant if users table not yet initialized.
+ */
+function get_staff_list(): array {
+    try {
+        $db = getDB();
+        $tables = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")->fetchAll(PDO::FETCH_COLUMN);
+        if (in_array('users', $tables, true)) {
+            $rows = $db->query("SELECT username, display_name FROM users WHERE is_active = 1 ORDER BY display_name")->fetchAll(PDO::FETCH_KEY_PAIR);
+            if (!empty($rows)) {
+                // Prepend placeholder
+                return array_merge(['' => 'Pilih nama...'], $rows);
+            }
+        }
+    } catch (Throwable $e) {
+        // Fall through to static list
+    }
+    return STAFF_LIST;
 }

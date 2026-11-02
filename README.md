@@ -21,13 +21,15 @@ HOW TO RUN
 ----------
 1. Install Docker Desktop (Windows/Mac) or Docker Engine (Linux).
 2. Create the env file:
-       cp .env.example .env
-   Edit .env to set APP_PIN to a strong PIN.
+        cp .env.example .env
+   Edit .env to set DEFAULT_USER_PIN to a strong PIN (default users start with 123456).
 3. Build and start:
-       docker compose up -d --build
+        docker compose up -d --build
 4. Open http://localhost:8080 in a browser.
-   Log in with the PIN you set as APP_PIN in .env.
-   The database table is created automatically on the first API call.
+   Select a username from the dropdown and enter the PIN (default: 123456
+   for all seeded users; change after first login via the Staff page).
+   The database tables (including `users` with seeded accounts) are created
+   automatically on the first initDB() call.
 
 IMPORTANT: There is NO default PIN. If APP_PASSWORD / APP_PIN is not set
 in the environment, login will fail with an error message directing the
@@ -48,20 +50,53 @@ keep concurrent writes safe (SQLite = 1 writer, fine for this app).
 
 USER IDENTITY & AUDIT TRAIL
 ---------------------------
-- Each staff member logs in by selecting their name from a dropdown and
-  entering the app PIN. The stable user identifier (andi, sari, budi, lina)
-  is stored in the session and used for audit attribution.
-- All defecta records have `created_by` and `updated_by` columns that
-  store the staff identifier at the time of the operation.
-- A dedicated `audit_log` table records every business action including
-  the actor, action type, entity, and before/after values.
-- Audit records are written server-side within database transactions —
-  the business change is rolled back if the audit write fails.
+- Each staff member has an individual account in the `users` table with:
+  - `username` (unique, e.g. `damayanti`, `faizin`, `aisyiyah`, `anggun`)
+  - `display_name` (e.g. "Damayanti (Apoteker)")
+  - `role` (`apoteker`, `manager`, or `staff`)
+  - `pin_hash` (bcrypt-hashed 6-digit PIN)
+  - `is_active` (soft-delete flag)
+- Login: select username from dropdown + enter individual 6-digit PIN.
+  - Default PIN for seeded users: `123456` (change after first login).
+  - Legacy shared PIN (APP_PASSWORD / APP_PIN) is still supported as a fallback.
+- Role-based access control:
+  - **Apoteker** and **Manajer**: can manage (add/edit/delete) other staff.
+  - **Staf**: can only view their own profile and change their own PIN.
+- The session stores the user ID, username, display name, and role. The stable
+  username is used for audit attribution via `current_staff()`.
+- All defecta records have `created_by` and `updated_by` columns that store the
+  staff identifier at the time of the operation.
+- A dedicated `audit_log` table records every business action including the
+  actor, action type, entity, and before/after values.
+- Audit records are written server-side within database transactions.
+
+USER MANAGEMENT
+----------------
+- Visit `/staff.php` to view, add, edit, and deactivate staff accounts.
+- Admin-only actions (add, delete, edit role/status of others):
+  - `POST api.php?action=staff_create`
+  - `POST api.php?action=staff_update`
+  - `POST api.php?action=staff_delete`
+- Self-service actions (staff updating own PIN):
+  - `POST api.php?action=staff_update` with old PIN verification
+- List all users: `GET api.php?action=staff_list`
+- Default staff list (seeded on first run):
+
+  | Username   | Display Name             | Role     | Default PIN |
+  |------------|--------------------------|----------|-------------|
+  | damayanti  | Damayanti (Apoteker)     | apoteker | 123456      |
+  | faizin     | Faizin (Manajer)         | manager  | 123456      |
+  | aisyiyah   | Aisyiyah (Staf)          | staff    | 123456      |
+  | a.nggun    | Anggun (Staf)            | staff    | 123456      |
 
 AUDIT LOG ACTIONS
 -----------------
 - LOGIN    — staff login (rate-limited to 5 attempts per 15 min per IP)
 - LOGOUT   — staff logout
+- USER_CREATE — new staff user added
+- USER_UPDATE — staff user edited (profile or PIN)
+- USER_DELETE — staff user deactivated (soft delete)
+- PIN_CHANGE  — staff changed their own PIN
 - CREATE   — new defecta item added
 - UPDATE   — defecta item edited
 - STATUS_CHANGE — status toggled between defecta/tersedia

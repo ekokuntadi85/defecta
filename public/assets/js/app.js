@@ -921,11 +921,11 @@ async function doLogin() {
     console.log('[Auth] Memulai login...');
     const pinInput = document.getElementById('pinInput');
     const staffSelect = document.getElementById('staffSelect');
-    const pin = pinInput.value;
-    const staff = staffSelect ? staffSelect.value : '';
+    const pin = pinInput ? pinInput.value : '';
+    const username = staffSelect ? staffSelect.value : '';
     const btn = document.getElementById('btnLogin');
-    if (!staff) { alert('Pilih nama staff terlebih dahulu.'); staffSelect?.focus(); return; }
-    if (!pin) { alert('Masukkan PIN terlebih dahulu.'); return; }
+    if (!username) { showToast('Pilih nama user terlebih dahulu.'); staffSelect?.focus(); return; }
+    if (!pin) { showToast('Masukkan PIN terlebih dahulu.'); pinInput?.focus(); return; }
 
     btn.disabled = true;
     btn.textContent = '⏳ Cek PIN...';
@@ -933,9 +933,9 @@ async function doLogin() {
     try {
         const params = new URLSearchParams();
         params.append('action', 'login');
-        params.append('password', pin);
+        params.append('username', username);
+        params.append('pin', pin);
         params.append('csrf_token', csrfToken());
-        if (staff) params.append('staff_name', staff);
 
         console.log('[Auth] Mengirim request ke ./api.php');
         const res = await fetch('./api.php', {
@@ -972,7 +972,7 @@ async function doLogin() {
         }
     } catch (e) {
         console.error('[Auth] Terjadi Error:', e);
-        alert('Login Gagal: ' + e.message);
+        showToast('Login Gagal: ' + e.message, 'error');
         btn.disabled = false;
         btn.textContent = 'Masuk';
         pinInput.focus();

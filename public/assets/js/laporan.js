@@ -18,11 +18,13 @@ async function loadReport(page = 1) {
     reportSearch = (document.getElementById('reportSearch')?.value || '').trim();
 
     if (!dateFrom || !dateTo) {
-        alert('Pilih tanggal Dari dan Sampai terlebih dahulu.');
+        showToast('⚠️ Pilih tanggal Dari dan Sampai terlebih dahulu.', 'error');
         return;
     }
     if (dateFrom > dateTo) {
-        alert('Tanggal "Dari" tidak boleh lebih besar dari "Sampai".');
+        showToast('⚠️ Tanggal "Dari" tidak boleh lebih besar dari "Sampai".', 'error');
+        return;
+    }
         return;
     }
 
@@ -299,7 +301,7 @@ async function printReportLaporan() {
         win.document.write(html);
         win.document.close();
     } catch (e) {
-        alert('Gagal menyiapkan laporan: ' + e.message);
+        showToast('❌ Gagal menyiapkan laporan: ' + e.message, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '🖨️ Cetak Laporan'; }
     }

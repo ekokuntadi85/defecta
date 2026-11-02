@@ -102,8 +102,10 @@ final class ApiSecurityTest extends TestCase
      */
     public function testStaffListValidation(): void
     {
-        $this->assertArrayHasKey('andi', STAFF_LIST);
-        $this->assertArrayHasKey('sari', STAFF_LIST);
+        $this->assertArrayHasKey('damayanti', STAFF_LIST);
+        $this->assertArrayHasKey('faizin', STAFF_LIST);
+        $this->assertArrayHasKey('aisyiyah', STAFF_LIST);
+        $this->assertArrayHasKey('anggun', STAFF_LIST);
         $this->assertArrayNotHasKey('hacker', STAFF_LIST);
         $this->assertNotEmpty(STAFF_LIST);
     }
@@ -117,7 +119,7 @@ final class ApiSecurityTest extends TestCase
         $isValid = $staff !== '' && array_key_exists($staff, STAFF_LIST);
         $this->assertFalse($isValid, 'unregistered staff should be rejected');
 
-        $staff = 'sari';
+        $staff = 'aisyiyah';
         $isValid = $staff !== '' && array_key_exists($staff, STAFF_LIST);
         $this->assertTrue($isValid, 'registered staff should be accepted');
     }
