@@ -8,7 +8,21 @@ require_once __DIR__ . '/config.php';
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
-// ── CSRF GUARD ──────────────────────────────────────────────
+/**
+ * Rate limiter — max LOGIN_MAX_ATTEMPTS per LOGIN_WINDOW_MINUTES per IP.
+ */
+function check_rate_limit(PDO $db, string $ip): void {
+    $window = LOGIN_WINDOW_MINUTES;
+    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
+    $stmt = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-{$window} minutes')");
+    $stmt->execute([':ip' => $ip]);
+    if ((int)$stmt->fetchColumn() >= LOGIN_MAX_ATTEMPTS) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'message' => 'Terlalu banyak percobaan. Coba lagi dalam ' . LOGIN_WINDOW_MINUTES . ' menit.']);
+        exit;
+    }
+}
+
 // Semua permintaan POST wajib membawa token CSRF dari session.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sent = $_POST['csrf_token'] ?? '';
@@ -35,17 +49,8 @@ if ($isStateChanging && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 if ($action === 'login') {
     initDB();
     $db = getDB();
-
-    // Rate limit: max 5 attempts per 15 min per IP
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
-    $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-15 minutes')");
-    $recent->execute([':ip' => $ip]);
-    if ((int)$recent->fetchColumn() >= 5) {
-        http_response_code(429);
-        echo json_encode(['success' => false, 'message' => 'Terlalu banyak percobaan. Coba lagi dalam 15 menit.']);
-        exit;
-    }
+    check_rate_limit($db, $ip);
 
     $username = trim($_POST['username'] ?? '');
     $pin      = $_POST['pin'] ?? '';
@@ -286,13 +291,39 @@ try {
             $ph     = implode(',', array_map(fn($i) => ":id$i", array_keys($ids)));
             $params = [':now' => now(), ':staff' => current_staff()];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
-            $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='defecta'");
+
             $db->beginTransaction();
-            $stmt->execute($params);
-            $n = $stmt->rowCount();
-            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'tersedia', 'ids' => $ids]);
-            $db->commit();
-            echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
+            try {
+                // Lock rows for update to prevent race condition
+                $inClause = implode(',', array_fill(0, count($ids), '?'));
+                $selectStmt = $db->prepare("SELECT id, nama_obat, status FROM defecta WHERE id IN ($inClause) AND status='defecta' FOR UPDATE");
+                $selectStmt->execute(array_values($ids));
+                $affectedRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                if (empty($affectedRows)) {
+                    $db->rollBack();
+                    echo json_encode(['success' => false, 'message' => 'Tidak ada item defecta yang valid untuk diproses.']);
+                    break;
+                }
+
+                $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='defecta'");
+                $stmt->execute($params);
+                $n = $stmt->rowCount();
+                $drugNames = array_column($affectedRows, 'nama_obat');
+                audit_log('BULK_UPDATE', 'defecta', null, $n, [
+                    'status'       => 'tersedia',
+                    'old_status'   => 'defecta',
+                    'new_status'   => 'tersedia',
+                    'ids'          => $ids,
+                    'nama_obat'    => $drugNames,
+                ]);
+                $db->commit();
+                echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal memperbarui status.']);
+            }
             break;
 
         // ── KEMBALIKAN BANYAK OBAT KE DEFECTA (tersedia → defecta) ─
@@ -308,17 +339,40 @@ try {
             $params = [':now' => now(), ':staff' => current_staff(), ':today' => $today];
             foreach ($ids as $i => $id) $params[":id$i"] = $id;
 
-            // Capture old values for audit before update
-            $inClause = implode(',', array_fill(0, count($ids), '?'));
-            $oldRows = $db->query("SELECT id, tanggal, updated_at, updated_by FROM defecta WHERE id IN ($inClause) AND status='tersedia'")->fetchAll(PDO::FETCH_ASSOC);
-
-            $stmt = $db->prepare("UPDATE defecta SET status='defecta', tanggal = :today, updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
             $db->beginTransaction();
-            $stmt->execute($params);
-            $n = $stmt->rowCount();
-            audit_log('BULK_UPDATE', 'defecta', null, $n, ['status' => 'defecta', 'tanggal' => $today, 'ids' => $ids, 'old' => $oldRows ?: null]);
-            $db->commit();
-            echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
+            try {
+                // Lock rows for update to prevent race condition
+                $inClause = implode(',', array_fill(0, count($ids), '?'));
+                $selectStmt = $db->prepare("SELECT id, nama_obat, tanggal, updated_at, updated_by, status FROM defecta WHERE id IN ($inClause) AND status='tersedia' FOR UPDATE");
+                $selectStmt->execute(array_values($ids));
+                $oldRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                if (empty($oldRows)) {
+                    $db->rollBack();
+                    echo json_encode(['success' => false, 'message' => 'Tidak ada item tersedia yang valid untuk diproses.']);
+                    break;
+                }
+
+                $stmt = $db->prepare("UPDATE defecta SET status='defecta', tanggal = :today, updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
+                $stmt->execute($params);
+                $n = $stmt->rowCount();
+                $drugNames = array_column($oldRows, 'nama_obat');
+                audit_log('BULK_UPDATE', 'defecta', null, $n, [
+                    'status'       => 'defecta',
+                    'old_status'   => 'tersedia',
+                    'new_status'   => 'defecta',
+                    'tanggal'      => $today,
+                    'ids'          => $ids,
+                    'nama_obat'    => $drugNames,
+                    'old'          => $oldRows ?: null,
+                ]);
+                $db->commit();
+                echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Gagal memperbarui status.']);
+            }
             break;
 
         // ── HAPUS BANYAK ITEM SEKALIGUS ────────────────────────────
@@ -409,13 +463,16 @@ try {
          case 'tersedia':
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'ID tidak valid.']); break; }
-            // Capture old status for audit
-            $oldRow = $db->query("SELECT status FROM defecta WHERE id = " . (int)$id)->fetch(PDO::FETCH_ASSOC);
+            // Capture old status and drug name for audit
+            $oldRow = $db->query("SELECT status, nama_obat FROM defecta WHERE id = " . (int)$id)->fetch(PDO::FETCH_ASSOC);
             $stmt = $db->prepare("UPDATE defecta SET status='tersedia', updated_at = :now, updated_by = :staff WHERE id=:id AND status='defecta'");
             $db->beginTransaction();
             $stmt->execute([':id' => $id, ':now' => now(), ':staff' => current_staff()]);
             if ($stmt->rowCount() > 0) {
-                audit_log('STATUS_CHANGE', 'defecta', $id, 1, ['old' => ['status' => $oldRow ? $oldRow['status'] : 'unknown'], 'new' => ['status' => 'tersedia']]);
+                audit_log('STATUS_CHANGE', 'defecta', $id, 1, [
+                    'old' => ['status' => $oldRow ? $oldRow['status'] : 'unknown', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'],
+                    'new' => ['status' => 'tersedia', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'],
+                ]);
             }
             $n = $stmt->rowCount();
             $db->commit();
@@ -519,20 +576,19 @@ try {
             }
 
             // Total per status dalam rentang
-            $stmtDef = $db->prepare("SELECT COUNT(*) FROM defecta $whereBase AND status='defecta'");
+            $stmtDef = $db->prepare("SELECT COUNT(*) FROM defecta " . $whereBase . " AND status='defecta'");
             $stmtDef->execute($paramsBase);
             $countDef = (int)$stmtDef->fetchColumn();
 
-            $stmtTer = $db->prepare("SELECT COUNT(*) FROM defecta $whereBase AND status='tersedia'");
+            $stmtTer = $db->prepare("SELECT COUNT(*) FROM defecta " . $whereBase . " AND status='tersedia'");
             $stmtTer->execute($paramsBase);
             $countTer = (int)$stmtTer->fetchColumn();
 
-            // Top 5 obat paling sering defecta
+            // Top 5 most recent defecta drugs (unique constraint prevents frequency count)
             $stmtTop = $db->prepare("
-                SELECT nama_obat, COUNT(*) as jumlah
-                FROM defecta $whereBase AND status='defecta'
-                GROUP BY nama_obat
-                ORDER BY jumlah DESC
+                SELECT nama_obat, tanggal
+                FROM defecta " . $whereBase . " AND status='defecta'
+                ORDER BY updated_at DESC
                 LIMIT 5
             ");
             $stmtTop->execute($paramsBase);
@@ -703,6 +759,7 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Method not allowed.']);
                 break;
             }
+            check_rate_limit($db, $_SERVER['REMOTE_ADDR'] ?? 'unknown');
             $file = basename($_POST['file'] ?? '');
             if ($file === '' || !str_ends_with($file, '.sqlite.bz2')) {
                 http_response_code(400);
@@ -805,6 +862,7 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Method not allowed.']);
                 break;
             }
+            check_rate_limit($db, $_SERVER['REMOTE_ADDR'] ?? 'unknown');
             if (!isset($_FILES['backup_file']) || $_FILES['backup_file']['error'] === UPLOAD_ERR_NO_FILE) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Tidak ada file yang diupload.']);
