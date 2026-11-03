@@ -25,6 +25,16 @@ define('APP_PASSWORD', $envPin !== '' ? $envPin : '');
 // Default PIN for seeded users (change after first login)
 define('DEFAULT_USER_PIN', '123456');
 
+// ── RATE LIMITING ──────────────────────────────────────────────────
+// Applied to login and sensitive endpoints (backup restore)
+// Use env vars for override, fall back to defaults
+if (!defined('LOGIN_MAX_ATTEMPTS')) {
+    define('LOGIN_MAX_ATTEMPTS', (int)(getenv('LOGIN_MAX_ATTEMPTS') ?: 5));
+}
+if (!defined('LOGIN_WINDOW_MINUTES')) {
+    define('LOGIN_WINDOW_MINUTES', (int)(getenv('LOGIN_WINDOW_MINUTES') ?: 15));
+}
+
 // ── STAFF LIST (backward compat — seeded from users table at runtime) ─
 define('STAFF_LIST', [
     ''           => 'Pilih nama...',
@@ -141,15 +151,16 @@ function is_admin(): bool {
 function authenticate_user(string $username, string $pin): ?array {
     $db = getDB();
 
-    // Rate limit: max 5 per 15 minutes per username
+    // Rate limit: max LOGIN_MAX_ATTEMPTS per LOGIN_WINDOW_MINUTES per IP
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
     // Clean old attempts (>1 hour)
     $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
 
-    $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-15 minutes')");
+    $window = LOGIN_WINDOW_MINUTES;
+    $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-{$window} minutes')");
     $recent->execute([':ip' => $ip]);
-    if ((int)$recent->fetchColumn() >= 5) {
+    if ((int)$recent->fetchColumn() >= LOGIN_MAX_ATTEMPTS) {
         return null; // rate limited
     }
 
@@ -262,7 +273,7 @@ function initDB(): void {
         ");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_status  ON defecta(status)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_tanggal ON defecta(tanggal)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_nama    ON defecta(nama_obat)");
+        $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nama_unique ON defecta(nama_obat)");
     } else {
         // ── MIGRASI: tambah kolom audit trail jika belum ada ──
         $pragmaRows = $db->query("PRAGMA table_info(defecta)")->fetchAll(PDO::FETCH_ASSOC);
@@ -272,6 +283,15 @@ function initDB(): void {
         }
         if (!in_array('updated_by', $colNames)) {
             $db->exec("ALTER TABLE defecta ADD COLUMN updated_by TEXT");
+        }
+
+        // ── MIGRASI: UNIQUE constraint pada nama_obat ──
+        // Deduplicate (keep latest by id) then enforce uniqueness
+        $hasUnique = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nama_unique'")->fetchColumn();
+        if (!$hasUnique) {
+            $db->exec("DELETE FROM defecta WHERE id NOT IN (SELECT MAX(id) FROM defecta GROUP BY nama_obat)");
+            $db->exec("DROP INDEX IF EXISTS idx_nama");
+            $db->exec("CREATE UNIQUE INDEX idx_nama_unique ON defecta(nama_obat)");
         }
     }
 
