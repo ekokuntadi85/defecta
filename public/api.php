@@ -20,7 +20,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // State-changing actions must use POST only
-$readOnlyActions = ['list', 'search_obat', 'export', 'staff_list', 'laporan_range'];
+$readOnlyActions = [
+    'list', 'search_obat', 'export', 'staff_list', 'laporan_range', 'report',
+    'backup_list', 'backup_download', 'report_summary',
+];
 $isStateChanging = !in_array($action, $readOnlyActions);
 if ($isStateChanging && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -570,7 +573,7 @@ try {
             $vacuumDest = $backupDir . '/' . $timestamp . '.sqlite';
             // Ensure no stale file
             @unlink($vacuumDest);
-            $db->exec("VACUUM INTO '" . addslashes($vacuumDest) . "'");
+            $db->exec("VACUUM INTO '" . str_replace("'", "''", $vacuumDest) . "'");
 
             // Validate the snapshot
             try {
@@ -662,6 +665,7 @@ try {
             header('Content-Length: ' . filesize($path));
             header('Cache-Control: no-store, private');
             readfile($path);
+            exit;
             break;
 
         // ── BACKUP: HAPUS FILE BACKUP ──────────────────────────────────
@@ -755,7 +759,7 @@ try {
                 }
                 $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore.sqlite';
                 @unlink($oldSnapshot);
-                $db->exec("VACUUM INTO '" . addslashes($oldSnapshot) . "'");
+                $db->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
                 $oldData = @file_get_contents($oldSnapshot);
                 @unlink($oldSnapshot);
                 if ($oldData !== false) {
@@ -812,6 +816,8 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Upload gagal. Kode error: ' . $f['error']]);
                 break;
             }
+            // Maks ukuran file upload: 50 MB
+            $maxSize = 50 * 1024 * 1024;
             // Validasi ekstensi: .sqlite.bz2 (dipaksa) atau .bz2
             $origName = $f['name'];
             $extOk = str_ends_with($origName, '.sqlite.bz2') || str_ends_with($origName, '.bz2');
@@ -881,7 +887,7 @@ try {
                 $bkPath = $backupDir . '/' . $bkName;
                 $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore-upload.sqlite';
                 @unlink($oldSnapshot);
-                $db->exec("VACUUM INTO '" . addslashes($oldSnapshot) . "'");
+                $db->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
                 $oldData = @file_get_contents($oldSnapshot);
                 @unlink($oldSnapshot);
                 if ($oldData !== false) {
