@@ -63,6 +63,7 @@ extract($templateVars, EXTR_SKIP);
 
   <?php include 'includes/toasts.php'; ?>
   <?php include 'includes/modal_backup.php'; ?>
+  <?php include 'includes/modal_confirm.php'; ?>
 
 <?php endif; ?>
 

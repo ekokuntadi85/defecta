@@ -25,8 +25,6 @@ async function loadReport(page = 1) {
         showToast('⚠️ Tanggal "Dari" tidak boleh lebih besar dari "Sampai".', 'error');
         return;
     }
-        return;
-    }
 
     // Show result area
     document.getElementById('reportResultWrap').style.display = 'block';

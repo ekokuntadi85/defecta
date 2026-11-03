@@ -23,6 +23,13 @@ ServerSignature Off
     Require all denied
 </FilesMatch>
 
+# Cache control for static assets (prevent stale JS/CSS after deployments)
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|css)$">
+        Header always set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
 # Security response headers
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
