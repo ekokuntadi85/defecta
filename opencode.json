@@ -1,0 +1,5 @@
+{
+  "plugins": [
+    "@auron-labs/opencode-impeccable"
+  ]
+}

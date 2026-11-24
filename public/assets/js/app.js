@@ -371,12 +371,6 @@ function renderPagination(page, pages, total) {
 }
 
 // ── DATE FORMATTER ─────────────────────────
-function formatDate(str) {
-    if (!str) return '–';
-    const d = new Date(str + 'T00:00:00');
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
 // ── MARK SINGLE (Bidirectional) ──────────────
 function confirmMarkSingle(id, namaObat, targetStatus, btn) {
     const isKeDefecta = targetStatus === 'defecta';
@@ -450,7 +444,7 @@ function openModal() {
     if (addFormEl) addFormEl.reset();
 
     const fTanggalEl = document.getElementById('f-tanggal');
-    if (fTanggalEl) fTanggalEl.value = window.today || '';
+    if (fTanggalEl) fTanggalEl.value = typeof getToday === 'function' ? getToday() : (window.today || '');
 
     const ketLainnyaWrapEl = document.getElementById('ketLainnyaWrap');
     if (ketLainnyaWrapEl) ketLainnyaWrapEl.classList.remove('show');
@@ -619,26 +613,6 @@ async function submitForm(e) {
     }
 }
 
-// ── TOAST ──────────────────────────────────
-function showToast(msg, type = 'success') {
-    const container = document.getElementById('toastContainer');
-    if (!container) return;
-    const t = document.createElement('div');
-    t.className = `toast toast-${type}`;
-    t.innerHTML = `<span class="toast-ico">${type === 'success' ? '✅' : '❌'}</span><span>${msg}</span>`;
-    container.appendChild(t);
-    setTimeout(() => {
-        t.style.opacity = '0';
-        t.style.transform = 'translateX(60px)';
-        t.style.transition = 'all .3s';
-        setTimeout(() => t.remove(), 320);
-    }, 3200);
-}
-
-// ── UTIL ───────────────────────────────────
-function escHtml(s) {
-    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 // ── CETAK / PDF ─────────────────────────────
 async function printReport() {
@@ -658,154 +632,43 @@ async function printReport() {
         const isRiwayat = currentMode === 'riwayat';
         const modeLabel = isRiwayat ? 'Riwayat Obat Terpenuhi' : 'Daftar Obat Defecta';
         const now = new Date();
-        const tglCetak = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const jamCetak = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        const printedAt = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' +
+                          now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
         const filterLabel = currentSearch ? `Filter: "${currentSearch}"` : 'Semua data';
 
-        const tableRows = rows.map((r, i) => {
+        // Transform rows for print generator
+        const printRows = rows.map((r, i) => {
             const tgl = isRiwayat
                 ? new Date(r.updated_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
                 : new Date(r.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-            return `
-        <tr>
-          <td style="text-align:center;border:1px solid #000;">${i + 1}</td>
-          <td style="border:1px solid #000;">${tgl}</td>
-          <td style="font-weight:600;border:1px solid #000;">${r.nama_obat}</td>
-          <td style="border:1px solid #000;">${r.keterangan}</td>
-        </tr>`;
-        }).join('');
+            return {
+                no: i + 1,
+                tanggal: tgl,
+                nama_obat: r.nama_obat,
+                keterangan: r.keterangan
+            };
+        });
 
-        const html = `<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8">
-  <title>${modeLabel} - Apotek Mentari Farma Bondowoso</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color:#000; background:#fff; padding:40px; }
-    .header-print {
-      border-bottom: 2px solid #000;
-      padding-bottom: 10px;
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-    }
-    .apotek-name { font-size: 20px; font-weight:800; }
-    .apotek-sub  { font-size: 12px; margin-top:2px; }
-    .report-title { font-size:18px; font-weight:700; text-align:center; margin-bottom:20px; text-transform:uppercase; }
-    .meta-bar {
-      margin-bottom: 15px;
-      display:flex;
-      justify-content: space-between;
-      font-size:12px;
-    }
-    table {
-      width:100%;
-      border-collapse:collapse;
-      font-size:12px;
-      margin-bottom:30px;
-    }
-    thead th {
-      padding:8px 10px;
-      text-align:left;
-      font-weight:700;
-      border:1px solid #000;
-      background:#f2f2f2;
-    }
-    tbody td {
-      padding:8px 10px;
-      border:1px solid #000;
-      vertical-align:middle;
-    }
-    .footer {
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      font-size:11px;
-    }
-    .sign-area { text-align:center; width:200px; }
-    .sign-line { border-top:1px solid #000; width:100%; margin:60px auto 5px; }
-    @media print {
-      body { padding: 0; }
-      .no-print { display:none !important; }
-      @page { size:A4; margin:1.5cm; }
-    }
-    .print-btn-bar {
-      background:#f2f2f2;
-      padding:10px 20px;
-      display:flex;
-      gap:10px;
-      margin-bottom:20px;
-      border:1px solid #ccc;
-    }
-    .print-btn {
-      padding:6px 15px;
-      background:#000;
-      color:#fff;
-      border:none;
-      border-radius:4px;
-      font-size:13px;
-      font-weight:700;
-      cursor:pointer;
-    }
-    .close-btn-pr {
-      padding:6px 15px;
-      background:#fff;
-      color:#000;
-      border:1px solid #000;
-      border-radius:4px;
-      font-size:13px;
-      cursor:pointer;
-    }
-  </style>
-</head>
-<body>
-  <div class="print-btn-bar no-print">
-    <button class="print-btn" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
-    <button class="close-btn-pr" onclick="window.close()">✕ Tutup</button>
-  </div>
-  <div class="header-print">
-    <div>
-      <div class="apotek-name">Apotek Mentari Farma</div>
-      <div class="apotek-sub">Bondowoso, Jawa Timur</div>
-    </div>
-    <div style="text-align:right;font-size:11px">
-      Dicetak pada: ${tglCetak}, ${jamCetak} WIB
-    </div>
-  </div>
-  <div class="report-title">${modeLabel}</div>
-  <div class="meta-bar">
-    <span><strong>Total:</strong> ${rows.length} item</span>
-    <span><strong>Filter:</strong> ${filterLabel}</span>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:40px;text-align:center">#</th>
-        <th style="width:120px">Tanggal</th>
-        <th>Nama Obat</th>
-        <th style="width:160px">Keterangan</th>
-      </tr>
-    </thead>
-    <tbody>${tableRows}</tbody>
-  </table>
-  <div class="footer">
-    <div>
-      Sistem Defecta Obat &mdash; Apotek Mentari Farma Bondowoso
-    </div>
-    <div class="sign-area">
-      <div>Mengetahui,</div>
-      <div class="sign-line"></div>
-      <div>Apoteker Penanggung Jawab</div>
-    </div>
-  </div>
-</body>
-</html>`;
+        const html = generatePrintHTML({
+            title: `${modeLabel} - Apotek Mentari Farma Bondowoso`,
+            rows: printRows,
+            columns: [
+                { key: 'no', header: '#', width: '40px', align: 'center' },
+                { key: 'tanggal', header: 'Tanggal', width: '120px' },
+                { key: 'nama_obat', header: 'Nama Obat' },
+                { key: 'keterangan', header: 'Keterangan', width: '160px' }
+            ],
+            meta: {
+                total: rows.length,
+                filter: filterLabel,
+                printedAt,
+                apotekName: 'Apotek Mentari Farma',
+                apotekSub: 'Bondowoso, Jawa Timur'
+            },
+            modeLabel
+        });
 
-        const win = window.open('', '_blank', 'width=900,height=700');
-        win.document.write(html);
-        win.document.close();
+        openPrintWindow(html);
     } catch (e) {
         showToast('❌ Gagal menyiapkan laporan: ' + e.message, 'error');
     } finally {
@@ -940,6 +803,7 @@ async function doLogin() {
         console.log('[Auth] Mengirim request ke ./api.php');
         const res = await fetch('./api.php', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         });
@@ -986,12 +850,6 @@ async function doLogout() {
     fd.append('csrf_token', csrfToken());
     await fetch('api.php', { method: 'POST', body: fd });
     location.reload();
-}
-
-// ── CSRF ────────────────────────────────────
-function csrfToken() {
-    const m = document.querySelector('meta[name="csrf-token"]');
-    return m ? m.content : '';
 }
 
 // ── BACKUP / RESTORE ────────────────────────
@@ -1283,6 +1141,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Login Form Submit
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', e => {
+            e.preventDefault();
+            doLogin();
+        });
+    }
+
     // Modal Background Click
     const modalOverlay = document.getElementById('modalOverlay');
     if (modalOverlay) {
@@ -1370,5 +1237,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         drugInput.addEventListener('blur', () => { setTimeout(closeAutocomplete, 200); });
+    }
+
+    // Auto-load list on index page (only if tableBody exists)
+    if (document.getElementById('tableBody') && typeof loadList === 'function') {
+        loadList(1);
     }
 });

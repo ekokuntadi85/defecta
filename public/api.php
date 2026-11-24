@@ -26,7 +26,8 @@ function check_rate_limit(PDO $db, string $ip): void {
 // Semua permintaan POST wajib membawa token CSRF dari session.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sent = $_POST['csrf_token'] ?? '';
-    if (!is_string($sent) || !hash_equals(csrf_token(), $sent)) {
+    $expected = csrf_token();
+    if (!is_string($sent) || !hash_equals($expected, $sent)) {
         http_response_code(403);
         echo json_encode(['success' => false, 'message' => 'Sesi tidak valid. Muat ulang halaman.']);
         exit;
@@ -62,29 +63,9 @@ if ($action === 'login') {
         exit;
     }
 
-    // Authenticate via individual user PIN (preferred)
+    // Authenticate via individual user PIN only (shared PIN fallback removed)
     $user = authenticate_user($username, $pin);
     if ($user === null) {
-        // Try shared PIN fallback if APP_PASSWORD is set (legacy support)
-        if (APP_PASSWORD !== '' && is_string($pin) && hash_equals(APP_PASSWORD, $pin) && array_key_exists($username, STAFF_LIST)) {
-            session_regenerate_id(true);
-            $_SESSION['logged_in']    = true;
-            $_SESSION['login_at']     = time();
-            $_SESSION['last_activity'] = time();
-            $_SESSION['user_id']      = null;
-            $_SESSION['username']     = $username;
-            $_SESSION['display_name'] = STAFF_LIST[$username] ?? $username;
-            $_SESSION['role']         = 'staff';
-            audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'username' => $username, 'method' => 'shared_pin']);
-            echo json_encode([
-                'success'      => true,
-                'message'      => 'Login berhasil.',
-                'staff_name'   => $username,
-                'display_name' => STAFF_LIST[$username] ?? $username,
-                'role'         => 'staff',
-            ]);
-            exit;
-        }
         http_response_code(401);
         echo json_encode(['success' => false, 'message' => 'Username atau PIN salah!']);
         exit;
@@ -99,7 +80,7 @@ if ($action === 'login') {
     $_SESSION['display_name'] = $user['display_name'];
     $_SESSION['role']        = $user['role'];
 
-    audit_log('LOGIN', null, null, 1, ['ip' => $ip, 'username' => $user['username'], 'role' => $user['role']]);
+    audit_log('LOGIN', null, null, null, null, ['ip' => $ip, 'username' => $user['username'], 'role' => $user['role']]);
     echo json_encode([
         'success'        => true,
         'message'        => 'Login berhasil.',
@@ -116,7 +97,7 @@ if ($action === 'logout') {
         exit;
     }
     initDB();
-    audit_log('LOGOUT', null, null, 1, ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown']);
+    audit_log('LOGOUT', null, null, null, null, ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown']);
     session_destroy();
     echo json_encode(['success' => true, 'message' => 'Logout berhasil.']);
     exit;
@@ -275,7 +256,7 @@ try {
             $db->beginTransaction();
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':now' => now(), ':staff' => current_staff()]);
             $id = (int)$db->lastInsertId();
-            audit_log('CREATE', 'defecta', $id, 1, ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan]);
+            audit_log('CREATE', 'defecta', $id, null, ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan], null);
             $db->commit();
             echo json_encode(['success' => true, 'message' => 'Data berhasil ditambahkan.', 'id' => $id]);
             break;
@@ -294,9 +275,8 @@ try {
 
             $db->beginTransaction();
             try {
-                // Lock rows for update to prevent race condition
                 $inClause = implode(',', array_fill(0, count($ids), '?'));
-                $selectStmt = $db->prepare("SELECT id, nama_obat, status FROM defecta WHERE id IN ($inClause) AND status='defecta' FOR UPDATE");
+                $selectStmt = $db->prepare("SELECT id, nama_obat, status FROM defecta WHERE id IN ($inClause) AND status='defecta'");
                 $selectStmt->execute(array_values($ids));
                 $affectedRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -310,13 +290,7 @@ try {
                 $stmt->execute($params);
                 $n = $stmt->rowCount();
                 $drugNames = array_column($affectedRows, 'nama_obat');
-                audit_log('BULK_UPDATE', 'defecta', null, $n, [
-                    'status'       => 'tersedia',
-                    'old_status'   => 'defecta',
-                    'new_status'   => 'tersedia',
-                    'ids'          => $ids,
-                    'nama_obat'    => $drugNames,
-                ]);
+                audit_log('BULK_UPDATE', 'defecta', null, ['old_status' => 'defecta', 'ids' => $ids], ['new_status' => 'tersedia', 'ids' => $ids], ['status' => 'tersedia', 'old_status' => 'defecta', 'new_status' => 'tersedia', 'ids' => $ids, 'nama_obat' => $drugNames]);
                 $db->commit();
                 echo json_encode(['success' => true, 'message' => "{$n} obat ditandai tersedia.", 'affected' => $n]);
             } catch (Throwable $e) {
@@ -341,9 +315,8 @@ try {
 
             $db->beginTransaction();
             try {
-                // Lock rows for update to prevent race condition
                 $inClause = implode(',', array_fill(0, count($ids), '?'));
-                $selectStmt = $db->prepare("SELECT id, nama_obat, tanggal, updated_at, updated_by, status FROM defecta WHERE id IN ($inClause) AND status='tersedia' FOR UPDATE");
+                $selectStmt = $db->prepare("SELECT id, nama_obat, tanggal, updated_at, updated_by, status FROM defecta WHERE id IN ($inClause) AND status='tersedia'");
                 $selectStmt->execute(array_values($ids));
                 $oldRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -353,19 +326,11 @@ try {
                     break;
                 }
 
-                $stmt = $db->prepare("UPDATE defecta SET status='defecta', tanggal = :today, updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
+                $stmt = $db->prepare("UPDATE defecta SET status='defecta', tanggal = :today, created_by = :staff, updated_at = :now, updated_by = :staff WHERE id IN ($ph) AND status='tersedia'");
                 $stmt->execute($params);
                 $n = $stmt->rowCount();
                 $drugNames = array_column($oldRows, 'nama_obat');
-                audit_log('BULK_UPDATE', 'defecta', null, $n, [
-                    'status'       => 'defecta',
-                    'old_status'   => 'tersedia',
-                    'new_status'   => 'defecta',
-                    'tanggal'      => $today,
-                    'ids'          => $ids,
-                    'nama_obat'    => $drugNames,
-                    'old'          => $oldRows ?: null,
-                ]);
+                audit_log('BULK_UPDATE', 'defecta', null, ['old_status' => 'tersedia', 'ids' => $ids], ['new_status' => 'defecta', 'ids' => $ids, 'tanggal' => $today], ['status' => 'defecta', 'old_status' => 'tersedia', 'new_status' => 'defecta', 'tanggal' => $today, 'ids' => $ids, 'nama_obat' => $drugNames, 'old' => $oldRows ?: null]);
                 $db->commit();
                 echo json_encode(['success' => true, 'message' => "{$n} obat dikembalikan ke defecta.", 'affected' => $n]);
             } catch (Throwable $e) {
@@ -393,7 +358,7 @@ try {
             $del->execute(array_values($ids));
             $n = $del->rowCount();
             foreach ($deletedRows as $row) {
-                audit_log('DELETE', 'defecta', $row['id'], 1, $row);
+                audit_log('DELETE', 'defecta', $row['id'], $row, null, null);
             }
             $db->commit();
             echo json_encode(['success' => true, 'message' => "{$n} item berhasil dihapus.", 'affected' => $n]);
@@ -453,7 +418,7 @@ try {
             ");
             $db->beginTransaction();
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':id' => $id, ':now' => now(), ':staff' => current_staff()]);
-            audit_log('UPDATE', 'defecta', $id, 1, ['old' => $oldRow ?: null, 'new' => ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan]]);
+            audit_log('UPDATE', 'defecta', $id, $oldRow ?: null, ['tanggal' => $tanggal, 'nama_obat' => $nama_obat, 'keterangan' => $keterangan], null);
             $db->commit();
 
             echo json_encode(['success' => true, 'message' => 'Data berhasil diperbarui.']);
@@ -469,10 +434,7 @@ try {
             $db->beginTransaction();
             $stmt->execute([':id' => $id, ':now' => now(), ':staff' => current_staff()]);
             if ($stmt->rowCount() > 0) {
-                audit_log('STATUS_CHANGE', 'defecta', $id, 1, [
-                    'old' => ['status' => $oldRow ? $oldRow['status'] : 'unknown', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'],
-                    'new' => ['status' => 'tersedia', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'],
-                ]);
+                audit_log('STATUS_CHANGE', 'defecta', $id, ['status' => $oldRow ? $oldRow['status'] : 'unknown', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'], ['status' => 'tersedia', 'nama_obat' => $oldRow ? $oldRow['nama_obat'] : 'unknown'], null);
             }
             $n = $stmt->rowCount();
             $db->commit();
@@ -627,6 +589,14 @@ try {
             // Use VACUUM INTO for a consistent snapshot (WAL-safe).
             // VACUUM INTO creates a new SQLite file with all WAL data merged.
             $vacuumDest = $backupDir . '/' . $timestamp . '.sqlite';
+            // Validate path stays within backup directory (prevent path traversal)
+            $realBackupDir = realpath($backupDir);
+            $realVacuumDest = realpath($vacuumDest) ?: $vacuumDest; // may not exist yet
+            if ($realBackupDir === false || !str_starts_with($realVacuumDest, $realBackupDir . DIRECTORY_SEPARATOR) && $realVacuumDest !== $realBackupDir) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Invalid backup path.']);
+                break;
+            }
             // Ensure no stale file
             @unlink($vacuumDest);
             $db->exec("VACUUM INTO '" . str_replace("'", "''", $vacuumDest) . "'");
@@ -667,7 +637,7 @@ try {
             @unlink($vacuumDest);
 
             $size = filesize($dest);
-            audit_log('BACKUP', null, null, 1, ['filename' => $filename, 'size' => $size]);
+            audit_log('BACKUP', null, null, null, null, ['filename' => $filename, 'size' => $size]);
             echo json_encode([
                 'success'    => true,
                 'message'    => 'Backup berhasil dibuat.',
@@ -775,15 +745,30 @@ try {
                 break;
             }
 
+            // Acquire exclusive lock for entire restore sequence (prevents race with other requests)
+            $lockFile = $src . '.restore.lock';
+            $lockFp = fopen($lockFile, 'c+');
+            if (!$lockFp || !flock($lockFp, LOCK_EX)) {
+                http_response_code(503);
+                echo json_encode(['success' => false, 'message' => 'Restore already in progress, try again.']);
+                break;
+            }
+
             // Baca & dekompresi ke file temporary
             $compressed = file_get_contents($path);
             if ($compressed === false) {
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal membaca file backup.']);
                 break;
             }
             $data = bzdecompress($compressed);
             if ($data === false) {
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Gagal mengekstrak backup (file korup?).']);
                 break;
@@ -792,6 +777,9 @@ try {
             // Tulis ke file temporary & validasi penuh
             $tmp = $src . '.tmp.' . bin2hex(random_bytes(8));
             if (file_put_contents($tmp, $data) === false) {
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal menulis file temporary.']);
                 break;
@@ -802,6 +790,9 @@ try {
                 validate_database_backup($tmp);
             } catch (Throwable $e) {
                 @unlink($tmp);
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Backup tidak valid.']);
                 break;
@@ -816,7 +807,10 @@ try {
                 }
                 $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore.sqlite';
                 @unlink($oldSnapshot);
-                $db->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
+                // Use a fresh PDO for VACUUM INTO since $db will be nulled
+                $vacuumPdo = new PDO('sqlite:' . $src, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                $vacuumPdo->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
+                $vacuumPdo = null;
                 $oldData = @file_get_contents($oldSnapshot);
                 @unlink($oldSnapshot);
                 if ($oldData !== false) {
@@ -838,13 +832,21 @@ try {
             // Atomic replace
             if (!rename($tmp, $src)) {
                 @unlink($tmp);
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal mengganti database.']);
                 break;
             }
 
             $totalRows = (int)(new PDO('sqlite:' . $src))->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
-            audit_log('RESTORE', null, null, 1, ['filename' => $file, 'total_rows' => $totalRows]);
+            audit_log('RESTORE', null, null, null, null, ['filename' => $file, 'total_rows' => $totalRows]);
+
+            // Release restore lock
+            flock($lockFp, LOCK_UN);
+            fclose($lockFp);
+            @unlink($lockFile);
 
             echo json_encode([
                 'success' => true,
@@ -935,6 +937,16 @@ try {
             $totalRows = (int)$countDb->query("SELECT COUNT(*) FROM defecta")->fetchColumn();
             unset($countDb);
 
+            // Acquire exclusive lock for entire restore sequence (prevents race with other requests)
+            $lockFile = $src . '.restore.lock';
+            $lockFp = fopen($lockFile, 'c+');
+            if (!$lockFp || !flock($lockFp, LOCK_EX)) {
+                @unlink($tmp);
+                http_response_code(503);
+                echo json_encode(['success' => false, 'message' => 'Restore already in progress, try again.']);
+                break;
+            }
+
             // Backup database lama sebelum replace (VACUUM INTO for WAL-consistency)
             $backupDir = dirname($src) . '/backups';
             if (!is_dir($backupDir)) {
@@ -945,7 +957,10 @@ try {
                 $bkPath = $backupDir . '/' . $bkName;
                 $oldSnapshot = $backupDir . '/' . date('Ymd-His') . '-prerestore-upload.sqlite';
                 @unlink($oldSnapshot);
-                $db->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
+                // Use a fresh PDO for VACUUM INTO since $db will be nulled
+                $vacuumPdo = new PDO('sqlite:' . $src, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                $vacuumPdo->exec("VACUUM INTO '" . str_replace("'", "''", $oldSnapshot) . "'");
+                $vacuumPdo = null;
                 $oldData = @file_get_contents($oldSnapshot);
                 @unlink($oldSnapshot);
                 if ($oldData !== false) {
@@ -967,12 +982,20 @@ try {
             // Atomic replace
             if (!rename($tmp, $src)) {
                 @unlink($tmp);
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+                @unlink($lockFile);
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Gagal mengganti database.']);
                 break;
             }
 
-            audit_log('RESTORE', null, null, 1, ['source' => 'upload', 'total_rows' => $totalRows]);
+            audit_log('RESTORE', null, null, null, null, ['source' => 'upload', 'total_rows' => $totalRows]);
+
+            // Release restore lock
+            flock($lockFp, LOCK_UN);
+            fclose($lockFp);
+            @unlink($lockFile);
 
             echo json_encode([
                 'success'    => true,
@@ -1035,7 +1058,7 @@ try {
                 ':ph' => password_hash($pin, PASSWORD_DEFAULT),
             ]);
             $newId = (int)$db->lastInsertId();
-            audit_log('USER_CREATE', 'users', $newId, 1, ['username' => $username, 'role' => $role]);
+            audit_log('USER_CREATE', 'users', $newId, null, ['username' => $username, 'role' => $role], null);
             $db->commit();
 
             echo json_encode(['success' => true, 'message' => "Staff '$displayName' berhasil ditambahkan.", 'id' => $newId]);
@@ -1127,9 +1150,9 @@ try {
             $stmt->execute($params);
 
             if ($newPin !== '' && $selfUpdate) {
-                audit_log('PIN_CHANGE', 'users', $id, 1, ['username' => $oldUser['username']]);
+                audit_log('PIN_CHANGE', 'users', $id, null, ['username' => $oldUser['username']], null);
             } else {
-                audit_log('USER_UPDATE', 'users', $id, 1, ['old' => $oldUser, 'new' => $fields]);
+                audit_log('USER_UPDATE', 'users', $id, $oldUser, $fields, null);
             }
             $db->commit();
 
@@ -1169,7 +1192,7 @@ try {
             $db->beginTransaction();
             $stmt = $db->prepare("UPDATE users SET is_active = 0 WHERE id = :id");
             $stmt->execute([':id' => $id]);
-            audit_log('USER_DELETE', 'users', $id, 1, ['username' => $user['username']]);
+            audit_log('USER_DELETE', 'users', $id, ['username' => $user['username']], null, null);
             $db->commit();
 
             echo json_encode(['success' => true, 'message' => "Staff '{$user['display_name']}' dinonaktifkan."]);

@@ -135,9 +135,9 @@ CREATE INDEX idx_login_ip ON login_attempts(ip, attempted_at);
 - Report page: `defecta` mode filters by `tanggal`, `tersedia` mode filters by `DATE(updated_at)`
 
 ### Backup System
-- Daily automatic snapshot at 02:15 via `VACUUM INTO` (handled in entrypoint.sh cron)
 - Manual backup: `backup_create` action → bzip2 compressed `.sqlite.bz2`
 - Restore: `backup_restore` validates SQLite integrity before atomic `rename()`
+- Daily cron at 02:15 runs `cleanup_login_attempts.php` to purge old login_attempts (>1 hour)
 
 ## Common Tasks
 
@@ -163,6 +163,7 @@ Edit `.env` → `APP_PIN=newpin` → `docker compose restart app`
 - Base: `alpine:3.20`
 - PHP: `php82`, `php82-apache2`, `php82-pdo_sqlite`, `php82-sqlite3`, `php82-opcache`, `php82-session`
 - OPcache tuned for low memory (32MB, 10k files)
-- Entrypoint: `docker/entrypoint.sh` (creates data dir, sets perms, starts Apache)
+- Entrypoint: `docker/entrypoint.sh` (creates data dir, sets perms, starts crond + Apache)
 - Healthcheck: `wget -q -O /dev/null http://localhost/`
 - Volume: `sqlite_data` → `/var/www/html/data` (owned by `apache:apache`)
+- Cron: busybox crond runs `cleanup_login_attempts.php` daily at 02:15

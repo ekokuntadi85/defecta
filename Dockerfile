@@ -20,7 +20,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # OPcache tuning for low-memory machines (big speed win, tiny RAM cost)
-RUN printf 'opcache.enable=1\nopcache.memory_consumption=32\nopcache.interned_strings_buffer=8\nopcache.max_accelerated_files=10000\nopcache.revalidate_freq=60\nopcache.validate_timestamps=1\n' > /etc/php82/conf.d/opcache.ini
+RUN printf 'opcache.enable=1\nopcache.memory_consumption=32\nopcache.interned_strings_buffer=8\nopcache.max_accelerated_files=10000\nopcache.revalidate_freq=60\nopcache.validate_timestamps=0\n' > /etc/php82/conf.d/opcache.ini
 
 # Local time (the old MySQL server used +07:00; SQLite CURRENT_TIMESTAMP is UTC
 # but PHP now() uses local Asia/Jakarta for display timestamps)

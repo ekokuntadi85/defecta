@@ -23,7 +23,7 @@ extract($templateVars, EXTR_SKIP);
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
 </head>
-<body>
+<body data-today="<?= htmlspecialchars($today, ENT_QUOTES) ?>">
 
 <?php if (!is_logged_in()): ?>
   <?php include 'includes/auth_login.php'; ?>
@@ -50,16 +50,6 @@ extract($templateVars, EXTR_SKIP);
 <?php endif; ?>
 
 <?php include 'includes/scripts.php'; ?>
-
-<?php if (is_logged_in()): ?>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof loadList === 'function') {
-        loadList(1);
-      }
-    });
-  </script>
-<?php endif; ?>
 
 </body>
 </html>

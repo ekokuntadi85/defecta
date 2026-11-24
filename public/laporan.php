@@ -23,12 +23,11 @@ extract($templateVars, EXTR_SKIP);
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
 </head>
-<body>
+<body data-today="<?= htmlspecialchars($today, ENT_QUOTES) ?>">
 
 <?php if (!is_logged_in()): ?>
   <?php include 'includes/auth_login.php'; ?>
 <?php else: ?>
-
   <?php $headerActivePage = 'laporan'; include 'includes/header.php'; ?>
 
   <main class="container">
@@ -39,11 +38,11 @@ extract($templateVars, EXTR_SKIP);
 
   <!-- Mobile Bottom Nav -->
   <nav class="bottom-nav">
-    <a class="nav-item" href="index.php">
+    <a class="nav-item" id="navDefecta" onclick="switchMode('defecta')">
       <i class="stat-ico">🔴</i>
       <span>Defecta</span>
     </a>
-    <a class="nav-item" href="index.php">
+    <a class="nav-item" id="navRiwayat" onclick="switchMode('riwayat')">
       <i class="stat-ico">✅</i>
       <span>Riwayat</span>
     </a>

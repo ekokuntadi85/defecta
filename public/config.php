@@ -154,9 +154,6 @@ function authenticate_user(string $username, string $pin): ?array {
     // Rate limit: max LOGIN_MAX_ATTEMPTS per LOGIN_WINDOW_MINUTES per IP
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
-    // Clean old attempts (>1 hour)
-    $db->exec("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 hour')");
-
     $window = LOGIN_WINDOW_MINUTES;
     $recent = $db->prepare("SELECT COUNT(*) FROM login_attempts WHERE ip = :ip AND attempted_at > datetime('now','-{$window} minutes')");
     $recent->execute([':ip' => $ip]);
@@ -183,21 +180,11 @@ function authenticate_user(string $username, string $pin): ?array {
 }
 
 /**
- * Authenticate by PIN (shared fallback) — only used when APP_PASSWORD is set
- * and no username is provided (legacy login support)
- */
-function authenticate_shared_pin(string $pin): bool {
-    if (APP_PASSWORD === '') return false;
-    return hash_equals(APP_PASSWORD, $pin);
-}
-
-/**
- * Seed default users if users table is empty
+ * Seed default users if users table is empty.
+ * Generates random 6-digit PIN per user, logs once for admin retrieval.
  */
 function seed_default_users(): void {
     $db = getDB();
-    $defaultPin = DEFAULT_USER_PIN;
-    $pinHash = password_hash($defaultPin, PASSWORD_DEFAULT);
 
     $users = [
         ['damayanti', 'Damayanti (Apoteker)', 'apoteker'],
@@ -208,7 +195,12 @@ function seed_default_users(): void {
 
     $stmt = $db->prepare("INSERT OR IGNORE INTO users (username, display_name, role, pin_hash, is_active) VALUES (:u, :dn, :r, :ph, 1)");
     foreach ($users as [$u, $dn, $r]) {
+        // Generate unique random PIN per user
+        $pin = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $pinHash = password_hash($pin, PASSWORD_DEFAULT);
         $stmt->execute([':u' => $u, ':dn' => $dn, ':r' => $r, ':ph' => $pinHash]);
+        // Log initial PIN once (container logs)
+        error_log("[defecta] Initial PIN for $u ($dn): $pin");
     }
 }
 
@@ -273,7 +265,9 @@ function initDB(): void {
         ");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_status  ON defecta(status)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_tanggal ON defecta(tanggal)");
-        $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nama_unique ON defecta(nama_obat)");
+        // Partial unique indexes: allow same drug in both statuses
+        $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nama_defecta ON defecta(nama_obat) WHERE status='defecta'");
+        $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nama_tersedia ON defecta(nama_obat) WHERE status='tersedia'");
     } else {
         // ── MIGRASI: tambah kolom audit trail jika belum ada ──
         $pragmaRows = $db->query("PRAGMA table_info(defecta)")->fetchAll(PDO::FETCH_ASSOC);
@@ -285,13 +279,22 @@ function initDB(): void {
             $db->exec("ALTER TABLE defecta ADD COLUMN updated_by TEXT");
         }
 
-        // ── MIGRASI: UNIQUE constraint pada nama_obat ──
-        // Deduplicate (keep latest by id) then enforce uniqueness
-        $hasUnique = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nama_unique'")->fetchColumn();
-        if (!$hasUnique) {
-            $db->exec("DELETE FROM defecta WHERE id NOT IN (SELECT MAX(id) FROM defecta GROUP BY nama_obat)");
-            $db->exec("DROP INDEX IF EXISTS idx_nama");
-            $db->exec("CREATE UNIQUE INDEX idx_nama_unique ON defecta(nama_obat)");
+        // ── MIGRASI: Replace global UNIQUE with partial unique indexes ──
+        // Drop old global unique index if exists
+        $hasGlobalUnique = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nama_unique'")->fetchColumn();
+        if ($hasGlobalUnique) {
+            // Deduplicate per status (keep latest by id per status)
+            $db->exec("DELETE FROM defecta WHERE id NOT IN (SELECT MAX(id) FROM defecta GROUP BY nama_obat, status)");
+            $db->exec("DROP INDEX idx_nama_unique");
+        }
+        // Create partial unique indexes
+        $hasPartialDef = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nama_defecta'")->fetchColumn();
+        if (!$hasPartialDef) {
+            $db->exec("CREATE UNIQUE INDEX idx_nama_defecta ON defecta(nama_obat) WHERE status='defecta'");
+        }
+        $hasPartialTer = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nama_tersedia'")->fetchColumn();
+        if (!$hasPartialTer) {
+            $db->exec("CREATE UNIQUE INDEX idx_nama_tersedia ON defecta(nama_obat) WHERE status='tersedia'");
         }
     }
 
@@ -331,7 +334,8 @@ function initDB(): void {
         $db->exec("
             CREATE TABLE audit_log (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      TEXT NOT NULL DEFAULT 'unknown',
+                user_id      INTEGER NOT NULL DEFAULT 0,
+                username     TEXT,
                 action       TEXT NOT NULL,
                 entity_type  TEXT,
                 entity_id    INTEGER,
@@ -344,6 +348,16 @@ function initDB(): void {
         $db->exec("CREATE INDEX IF NOT EXISTS idx_audit_action  ON audit_log(action, created_at)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_audit_entity  ON audit_log(entity_type, entity_id)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_audit_user    ON audit_log(user_id, created_at)");
+    } else {
+        // ── MIGRASI: audit_log schema changes ──
+        $pragmaRows = $db->query("PRAGMA table_info(audit_log)")->fetchAll(PDO::FETCH_ASSOC);
+        $colNames = array_column($pragmaRows, 'name');
+        if (!in_array('username', $colNames)) {
+            $db->exec("ALTER TABLE audit_log ADD COLUMN username TEXT");
+        }
+        // Migrate user_id from TEXT to INTEGER (0 for unknown/migrated)
+        // Note: SQLite doesn't support ALTER COLUMN TYPE, so we keep as TEXT but treat as integer
+        // New entries will use integer user_id from current_user_id()
     }
 }
 
@@ -352,19 +366,24 @@ function initDB(): void {
  *
  * Actor (user_id) is always derived from the authenticated session —
  * never trusted from client input.
+ * Signature: audit_log(action, entityType, entityId, oldValues, newValues, metadata)
+ * All params after entityId are optional.
  */
-function audit_log(string $action, ?string $entityType, $entityId, $count = 1, $metadata = null): void {
+function audit_log(string $action, ?string $entityType, $entityId, $oldValues = null, $newValues = null, $metadata = null): void {
     try {
         $db = getDB();
         $stmt = $db->prepare("
-            INSERT INTO audit_log (user_id, action, entity_type, entity_id, metadata)
-            VALUES (:uid, :action, :etype, :eid, :meta)
+            INSERT INTO audit_log (user_id, username, action, entity_type, entity_id, old_values, new_values, metadata)
+            VALUES (:uid, :uname, :action, :etype, :eid, :oldv, :newv, :meta)
         ");
         $stmt->execute([
-            ':uid'    => current_staff(),
+            ':uid'    => current_user_id() ?? 0,
+            ':uname'  => current_username(),
             ':action' => $action,
             ':etype'  => $entityType,
             ':eid'    => $entityId === null ? null : (int)$entityId,
+            ':oldv'   => $oldValues === null ? null : (is_string($oldValues) ? $oldValues : json_encode($oldValues)),
+            ':newv'   => $newValues === null ? null : (is_string($newValues) ? $newValues : json_encode($newValues)),
             ':meta'   => $metadata === null ? null : (is_string($metadata) ? $metadata : json_encode($metadata)),
         ]);
     } catch (Throwable $e) {

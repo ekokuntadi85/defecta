@@ -167,17 +167,6 @@ function renderReportPagination(page, pages, total) {
     el.innerHTML = html;
 }
 
-// ── DATE FORMATTER ────────────────────────
-function formatDateLaporan(str) {
-    if (!str) return '–';
-    const d = new Date(str + 'T00:00:00');
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-// ── UTIL ──────────────────────────────────
-function escHtml(s) {
-    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 // ── CETAK LAPORAN ─────────────────────────
 async function printReportLaporan() {
@@ -208,96 +197,52 @@ async function printReportLaporan() {
         const modeLabels = { defecta: 'Defecta', tersedia: 'Tersedia', semua: 'Semua' };
         const modeLabel = modeLabels[reportMode] || 'Semua';
         const now = new Date();
-        const tglCetak = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const jamCetak = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        const printedAt = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' +
+                          now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
         const fromFormatted = formatDateLaporan(dateFrom);
         const toFormatted = formatDateLaporan(dateTo);
 
-            const tableRows = allRows.map((r, i) => {
+        // Transform rows for print generator
+        const printRows = allRows.map((r, i) => {
             const tgl = r.status === 'tersedia'
                 ? formatDateLaporan(r.updated_at?.split(' ')[0])
                 : formatDateLaporan(r.tanggal);
             const status = r.status === 'defecta' ? 'Defecta' : 'Tersedia';
             const createdBy = r.created_by || '—';
-            return `
-            <tr>
-              <td style="text-align:center;border:1px solid #000;">${i + 1}</td>
-              <td style="border:1px solid #000;">${tgl}</td>
-              <td style="font-weight:600;border:1px solid #000;">${r.nama_obat}</td>
-              <td style="border:1px solid #000;">${r.keterangan}</td>
-              <td style="text-align:center;border:1px solid #000;">${status}</td>
-              <td style="border:1px solid #000;">${createdBy}</td>
-            </tr>`;
-        }).join('');
+            return {
+                no: i + 1,
+                tanggal: tgl,
+                nama_obat: r.nama_obat,
+                keterangan: r.keterangan,
+                status,
+                created_by: createdBy
+            };
+        });
 
-        const html = `<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8">
-  <title>Laporan Riwayat - Apotek Mentari Farma Bondowoso</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color:#000; background:#fff; padding:40px; }
-    .header-print { border-bottom:2px solid #000; padding-bottom:10px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-end; }
-    .apotek-name { font-size:20px; font-weight:800; }
-    .apotek-sub { font-size:12px; margin-top:2px; }
-    .report-title { font-size:18px; font-weight:700; text-align:center; margin-bottom:16px; text-transform:uppercase; }
-    .meta-bar { margin-bottom:15px; display:flex; justify-content:space-between; font-size:12px; flex-wrap:wrap; gap:8px; }
-    table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:30px; }
-    thead th { padding:8px 10px; text-align:left; font-weight:700; border:1px solid #000; background:#f2f2f2; }
-    tbody td { padding:8px 10px; border:1px solid #000; vertical-align:middle; }
-    .footer { display:flex; justify-content:space-between; align-items:flex-start; font-size:11px; }
-    .sign-area { text-align:center; width:200px; }
-    .sign-line { border-top:1px solid #000; width:100%; margin:60px auto 5px; }
-    @media print { body { padding:0; } .no-print { display:none !important; } @page { size:A4; margin:1.5cm; } }
-    .print-btn-bar { background:#f2f2f2; padding:10px 20px; display:flex; gap:10px; margin-bottom:20px; border:1px solid #ccc; }
-    .print-btn { padding:6px 15px; background:#000; color:#fff; border:none; border-radius:4px; font-size:13px; font-weight:700; cursor:pointer; }
-    .close-btn-pr { padding:6px 15px; background:#fff; color:#000; border:1px solid #000; border-radius:4px; font-size:13px; cursor:pointer; }
-  </style>
-</head>
-<body>
-  <div class="print-btn-bar no-print">
-    <button class="print-btn" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
-    <button class="close-btn-pr" onclick="window.close()">✕ Tutup</button>
-  </div>
-  <div class="header-print">
-    <div>
-      <div class="apotek-name">Apotek Mentari Farma</div>
-      <div class="apotek-sub">Bondowoso, Jawa Timur</div>
-    </div>
-    <div style="text-align:right;font-size:11px">Dicetak pada: ${tglCetak}, ${jamCetak} WIB</div>
-  </div>
-  <div class="report-title">Laporan Riwayat Defecta</div>
-  <div class="meta-bar">
-    <span><strong>Periode:</strong> ${fromFormatted} — ${toFormatted}</span>
-    <span><strong>Mode:</strong> ${modeLabel}</span>
-    <span><strong>Total:</strong> ${allRows.length} item</span>
-    ${search ? `<span><strong>Filter:</strong> "${search}"</span>` : ''}
-  </div>
-  <table>
-    <thead><tr>
-      <th style="width:40px;text-align:center">#</th>
-      <th style="width:120px">Tanggal</th>
-      <th>Nama Obat</th>
-      <th style="width:140px">Keterangan</th>
-      <th style="width:90px;text-align:center">Status</th>
-      <th style="width:120px">Dibuat Oleh</th>
-    </tr></thead>
-    <tbody>${tableRows}</tbody>
-  </table>
-  <div class="footer">
-    <div>Sistem Defecta Obat &mdash; Apotek Mentari Farma Bondowoso</div>
-    <div class="sign-area">
-      <div>Mengetahui,</div>
-      <div class="sign-line"></div>
-      <div>Apoteker Penanggung Jawab</div>
-    </div>
-  </div>
-</body></html>`;
+        const html = generatePrintHTML({
+            title: 'Laporan Riwayat - Apotek Mentari Farma Bondowoso',
+            rows: printRows,
+            columns: [
+                { key: 'no', header: '#', width: '40px', align: 'center' },
+                { key: 'tanggal', header: 'Tanggal', width: '120px' },
+                { key: 'nama_obat', header: 'Nama Obat' },
+                { key: 'keterangan', header: 'Keterangan', width: '140px' },
+                { key: 'status', header: 'Status', width: '90px', align: 'center' },
+                { key: 'created_by', header: 'Dibuat Oleh', width: '120px' }
+            ],
+            meta: {
+                total: allRows.length,
+                filter: search ? `"${search}"` : 'Semua data',
+                printedAt,
+                apotekName: 'Apotek Mentari Farma',
+                apotekSub: 'Bondowoso, Jawa Timur'
+            },
+            modeLabel: 'Laporan Riwayat Defecta',
+            dateFrom: fromFormatted,
+            dateTo: toFormatted
+        });
 
-        const win = window.open('', '_blank', 'width=900,height=700');
-        win.document.write(html);
-        win.document.close();
+        openPrintWindow(html);
     } catch (e) {
         showToast('❌ Gagal menyiapkan laporan: ' + e.message, 'error');
     } finally {

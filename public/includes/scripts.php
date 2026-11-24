@@ -17,14 +17,13 @@ function jsUrl(string $path): string {
     return $path . '?v=' . $v;
 }
 ?>
-<script>
-  window.today = '<?= $today ?? date('Y-m-d') ?>';
-</script>
 <?php if (is_logged_in()): ?>
+  <script src="<?= jsUrl('assets/js/util.js') ?>"></script>
   <script src="<?= jsUrl('assets/js/app.js') ?>"></script>
   <?php if (basename($_SERVER['SCRIPT_NAME'] ?? '') === 'laporan.php'): ?>
     <script src="<?= jsUrl('assets/js/laporan.js') ?>"></script>
   <?php endif; ?>
 <?php else: ?>
+  <script src="<?= jsUrl('assets/js/util.js') ?>"></script>
   <script src="<?= jsUrl('assets/js/app.js') ?>"></script>
 <?php endif; ?>
