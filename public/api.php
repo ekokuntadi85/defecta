@@ -123,6 +123,8 @@ try {
             $offset = ($page - 1) * $limit;
             $search = trim($_GET['search'] ?? '');
             $mode   = ($_GET['mode'] ?? 'defecta') === 'riwayat' ? 'tersedia' : 'defecta';
+            $sort   = in_array($_GET['sort'] ?? '', ['id', 'permintaan_count', 'tanggal', 'nama_obat']) ? $_GET['sort'] : 'id';
+            $dir    = strtoupper($_GET['dir'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
 
             $where  = "WHERE status = :mode";
             $params = [':mode' => $mode];
@@ -137,11 +139,12 @@ try {
             $cntStmt->execute($params);
             $totalCount = (int)$cntStmt->fetchColumn();
 
-            // Rows
+            // Rows - include permintaan_count
+            $orderBy = "ORDER BY " . $sort . " " . $dir . ", updated_at DESC, id DESC";
             $stmt = $db->prepare("
-                SELECT id, tanggal, nama_obat, keterangan, status, updated_at, created_by, updated_by
+                SELECT id, tanggal, nama_obat, keterangan, status, updated_at, created_by, updated_by, permintaan_count
                 FROM defecta $where
-                ORDER BY updated_at DESC, id DESC
+                $orderBy
                 LIMIT :limit OFFSET :offset
             ");
             foreach ($params as $k => $v) {
@@ -252,7 +255,7 @@ try {
                 break;
             }
 
-            $stmt = $db->prepare("INSERT INTO defecta (tanggal, nama_obat, keterangan, status, created_at, updated_at, created_by, updated_by) VALUES (:tgl, :obat, :ket, 'defecta', :now, :now, :staff, :staff)");
+            $stmt = $db->prepare("INSERT INTO defecta (tanggal, nama_obat, keterangan, status, created_at, updated_at, created_by, updated_by, permintaan_count) VALUES (:tgl, :obat, :ket, 'defecta', :now, :now, :staff, :staff, 1)");
             $db->beginTransaction();
             $stmt->execute([':tgl' => $tanggal, ':obat' => $nama_obat, ':ket' => $keterangan, ':now' => now(), ':staff' => current_staff()]);
             $id = (int)$db->lastInsertId();
@@ -443,6 +446,32 @@ try {
                 : json_encode(['success' => false, 'message' => 'Data tidak ditemukan.']);
             break;
 
+        // ── INCREMENT PERMINTAAN COUNT ────────────────────────────
+        case 'increment_permintaan':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['success' => false, 'message' => 'Method not allowed.']);
+                break;
+            }
+            check_rate_limit($db, $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+            $id = (int)($_POST['id'] ?? 0);
+            if ($id <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'ID tidak valid.']);
+                break;
+            }
+            $stmt = $db->prepare("UPDATE defecta SET permintaan_count = permintaan_count + 1 WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+            if ($stmt->rowCount() === 0) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'message' => 'Data tidak ditemukan.']);
+                break;
+            }
+            $newCount = (int)$db->query("SELECT permintaan_count FROM defecta WHERE id = $id")->fetchColumn();
+            audit_log('INCREMENT_PERMINTAAN', 'defecta', $id, null, ['permintaan_count' => $newCount], null);
+            echo json_encode(['success' => true, 'message' => 'Counter permintaan ditambah.', 'permintaan_count' => $newCount]);
+            break;
+
         // ── LAPORAN RIWAYAT BERDASARKAN TANGGAL ────────────────────
         case 'report':
             $page     = max(1, (int)($_GET['page'] ?? 1));
@@ -546,11 +575,12 @@ try {
             $stmtTer->execute($paramsBase);
             $countTer = (int)$stmtTer->fetchColumn();
 
-            // Top 5 most recent defecta drugs (unique constraint prevents frequency count)
+            // Top 5 paling sering defecta (berdasarkan permintaan_count)
             $stmtTop = $db->prepare("
-                SELECT nama_obat, tanggal
+                SELECT nama_obat, SUM(permintaan_count) as jumlah
                 FROM defecta " . $whereBase . " AND status='defecta'
-                ORDER BY updated_at DESC
+                GROUP BY nama_obat
+                ORDER BY jumlah DESC, nama_obat ASC
                 LIMIT 5
             ");
             $stmtTop->execute($paramsBase);

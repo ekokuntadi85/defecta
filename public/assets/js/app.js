@@ -2,6 +2,8 @@
 let currentPage = 1;
 let currentSearch = '';
 let currentMode = 'defecta'; // 'defecta' | 'riwayat'
+let currentSort = 'id'; // 'id' | 'permintaan_count'
+let sortDir = 'desc'; // 'asc' | 'desc'
 let totalPages = 1;
 let totalDefecta = 0;
 let debounceTimer;
@@ -168,6 +170,8 @@ function switchMode(mode) {
     if (currentMode === mode) return; // sudah di mode ini
     currentMode = mode;
     selectedIds.clear();
+    currentSort = 'id';
+    sortDir = 'desc';
 
     const searchInputEl = document.getElementById('searchInput');
     if (searchInputEl) searchInputEl.value = '';
@@ -199,6 +203,25 @@ function switchMode(mode) {
     loadList(1, '');
 }
 
+// ── SORT TOGGLE ────────────────────────────
+function toggleSort(field) {
+    if (currentSort === field) {
+        sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+        currentSort = field;
+        sortDir = 'desc';
+    }
+    loadList(1);
+}
+
+// ── APPLY SORT FROM DROPDOWN ───────────────
+function applySort(value) {
+    const idx = value.lastIndexOf('_');
+    currentSort = value.slice(0, idx);
+    sortDir = value.slice(idx + 1);
+    loadList(1);
+}
+
 // ── FETCH LIST ─────────────────────────────
 async function loadList(page = 1, search = currentSearch) {
     currentPage = page;
@@ -211,7 +234,7 @@ async function loadList(page = 1, search = currentSearch) {
     if (mList) mList.innerHTML = `<div style="text-align:center;padding:40px;opacity:.6;"><span class="spinner"></span></div>`;
 
     try {
-        const url = `api.php?action=list&page=${page}&mode=${currentMode}&search=${encodeURIComponent(search)}`;
+        const url = `api.php?action=list&page=${page}&mode=${currentMode}&search=${encodeURIComponent(search)}&sort=${currentSort}&dir=${sortDir}`;
         const res = await fetch(url);
         const json = await res.json();
 
@@ -272,6 +295,9 @@ function renderTable(rows, page, limit) {
         const actionBtn = isRiwayat
             ? `<button class="btn-check" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)" data-action="undo" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Kembalikan ke Defecta"><span style="color:var(--danger)">↩</span></button>`
             : `<button class="btn-check" data-action="done" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Tandai Tersedia" id="chk-${row.id}"><span>✓</span></button>`;
+        const incrementBtn = !isRiwayat
+            ? `<button class="btn-check" style="background:#fffbeb;border-color:#fde68a" data-action="increment" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Pelanggan minta (kosong)"><span style="color:#16a34a">+</span></button>`
+            : '';
 
         return {
             id: row.id,
@@ -283,8 +309,9 @@ function renderTable(rows, page, limit) {
           <td class="td-date">${tgl}</td>
           <td class="td-drug">${escHtml(row.nama_obat)}</td>
           <td class="td-notes"><span class="badge-ket ${badgeClass}">${ket}</span></td>
+          <td style="text-align:center">${row.permintaan_count || 0}</td>
           <td style="font-size:12px;color:var(--text-muted);text-align:center">${escHtml(staff)}</td>
-          <td style="text-align:center"><div style="display:flex;gap:6px;justify-content:center;align-items:center;">${editBtn}${actionBtn}</div></td>
+          <td style="text-align:center"><div style="display:flex;gap:6px;justify-content:center;align-items:center;">${editBtn}${actionBtn}${incrementBtn}</div></td>
         </tr>`,
             card: `
         <div class="mobile-card ${isChecked ? 'row-selected' : ''}" id="card-${row.id}" data-card-id="${row.id}">
@@ -303,6 +330,7 @@ function renderTable(rows, page, limit) {
                     ? `<button class="mobile-card-check btn-undo" data-action="undo" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}">↩ Kembalikan ke Defecta</button>`
                     : `<button class="mobile-card-check" data-action="done" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}">✅ Tandai Tersedia</button>`
                 }
+            ${!isRiwayat ? `<button class="mobile-card-check" style="background:#fffbeb;border-color:#fde68a" data-action="increment" data-id="${row.id}" data-nama="${escHtml(row.nama_obat)}" title="Pelanggan minta (kosong)"><span style="color:#16a34a">+</span> <span class="mobile-card-count">${row.permintaan_count || 0}</span></button>` : ''}
           </div>
         </div>`
         };
@@ -323,6 +351,9 @@ function handleActionClick(e) {
     switch (btn.dataset.action) {
         case 'edit':
             openEditModal(id, nama, btn.dataset.tanggal || '', btn.dataset.ket || '');
+            break;
+        case 'increment':
+            incrementPermintaan(id, nama, btn);
             break;
         case 'done':
             confirmMarkSingle(id, nama, 'tersedia', btn);
@@ -371,6 +402,44 @@ function renderPagination(page, pages, total) {
 }
 
 // ── DATE FORMATTER ─────────────────────────
+// ── INCREMENT PERMINTAAN ────────────────────
+async function incrementPermintaan(id, namaObat, btn) {
+    btn.disabled = true;
+    btn.textContent = '...';
+    
+    try {
+        const fd = new FormData();
+        fd.append('action', 'increment_permintaan');
+        fd.append('id', id);
+        fd.append('csrf_token', csrfToken());
+        
+        const res = await fetch('api.php', { method: 'POST', body: fd });
+        const json = await res.json();
+        
+        if (!json.success) throw new Error(json.message);
+        
+        showToast(`✅ ${namaObat} - permintaan: ${json.permintaan_count}`, 'success');
+        
+        // Update counter in UI
+        const row = document.getElementById('row-' + id);
+        if (row) {
+            const countCell = row.cells[5]; // permintaan_count column
+            if (countCell) countCell.textContent = json.permintaan_count;
+        }
+        
+        const card = document.getElementById('card-' + id);
+        if (card) {
+            const countCell = card.querySelector('.mobile-card-count');
+            if (countCell) countCell.textContent = json.permintaan_count;
+        }
+    } catch (e) {
+        showToast('❌ Gagal: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '➕';
+    }
+}
+
 // ── MARK SINGLE (Bidirectional) ──────────────
 function confirmMarkSingle(id, namaObat, targetStatus, btn) {
     const isKeDefecta = targetStatus === 'defecta';

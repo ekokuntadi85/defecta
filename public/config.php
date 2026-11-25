@@ -296,6 +296,18 @@ function initDB(): void {
         if (!$hasPartialTer) {
             $db->exec("CREATE UNIQUE INDEX idx_nama_tersedia ON defecta(nama_obat) WHERE status='tersedia'");
         }
+
+        // ── MIGRASI: tambah kolom permintaan_count jika belum ada ──
+        $pragmaRows = $db->query("PRAGMA table_info(defecta)")->fetchAll(PDO::FETCH_ASSOC);
+        $colNames = array_column($pragmaRows, 'name');
+        if (!in_array('permintaan_count', $colNames)) {
+            $db->exec("ALTER TABLE defecta ADD COLUMN permintaan_count INTEGER DEFAULT 0");
+        }
+        // Index untuk sorting permintaan_count
+        $hasIdxPermintaan = $db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_permintaan'")->fetchColumn();
+        if (!$hasIdxPermintaan) {
+            $db->exec("CREATE INDEX IF NOT EXISTS idx_permintaan ON defecta(permintaan_count DESC)");
+        }
     }
 
     if (!in_array('login_attempts', $tables, true)) {
